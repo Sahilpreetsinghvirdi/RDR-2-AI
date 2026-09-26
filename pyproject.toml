@@ -1,0 +1,30 @@
+[project]
+name = "rdr2-ai"
+version = "0.1.0"
+description = "Local autonomous AI player research platform for Red Dead Redemption 2 Story Mode (screen capture + input, no game file modification)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python>=4.9",
+    "PyYAML>=6.0",
+    "mss>=9.0",
+]
+
+[project.optional-dependencies]
+capture = ["dxcam>=0.3.0"]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".venv", "recordings", "logs", "datasets", "models"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
