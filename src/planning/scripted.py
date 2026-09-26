@@ -52,8 +52,11 @@ class ScriptedPlanner:
     def current(self) -> str:
         return _label(SCRIPT[self._index])
 
-    def step(self, now: float, status: StatusTracker) -> None:
-        """Advance one control tick; *now* is the loop's monotonic timestamp."""
+    def step(
+        self, now: float, status: StatusTracker, frame: object | None = None,
+        game_state: object | None = None,
+    ) -> None:
+        """Advance one control tick; *frame* is accepted for planner parity."""
         self._locomotion.tick()
         action = SCRIPT[self._index]
         kind = action["kind"]

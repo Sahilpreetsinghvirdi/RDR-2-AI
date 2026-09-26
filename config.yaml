@@ -3,7 +3,7 @@
 
 agent:
   name: rdr2-ai
-  phase: 4
+  phase: 5
   loop_hz: 10.0          # main decision-loop rate
 
 window:
@@ -61,6 +61,7 @@ safety:
 
 control:
   enabled: false               # autopilot locomotion (off = observe only)
+  mode: script                 # script = fixed demo cycle | route = follow nav.legs
   keys:
     forward: w
     back: s
@@ -73,6 +74,29 @@ control:
   max_turn_deg_per_tick: 30.0  # hard cap on camera turn per control tick
   min_step_s: 0.1              # shortest single move command
   max_step_s: 4.0              # longest single move command (clamped)
+  nav:                         # used when mode: route (dead-reckoned legs)
+    start_heading_deg: 0.0     # camera heading when the route starts (calibrate)
+    walk_speed_mps: 1.6        # assumed on-foot speed for distance tracking
+    heading_tol_deg: 5.0       # bearing error counted as "faced"
+    step_s: 0.5                # forward burst length per control tick
+    sprint_after_m: 6.0        # remaining distance that triggers sprinting (0 = never)
+    stall_flow_eps: 0.5        # minimap px/frame below this = not moving
+    stall_timeout_s: 3.0       # walking with no flow this long = blocked
+    legs:                      # [bearing_deg, meters]; empty = route mode invalid
+      - [0.0, 8.0]
+      - [90.0, 6.0]
+
+mission:
+  enabled: false               # run the task list below (overrides control.mode)
+  loop: false                  # restart the list after the last task
+  tasks:                       # executed in order, one per control tick min
+    - log: {text: "mission start"}
+    - turn: {deg: 90}          # +right / -left, clamped per tick
+    - walk: {meters: 8.0}      # dead-reckoned; bearing optional (keeps heading)
+    - wait: {seconds: 1.0}
+    - wait_for: {field: environment.water_detected, equals: true, timeout_s: 30}
+    - interact: {}             # taps control.keys.interact (E)
+    - log: {text: "mission complete"}
 
 vision:
   fast:

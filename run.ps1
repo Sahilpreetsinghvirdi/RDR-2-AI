@@ -9,6 +9,7 @@
 param(
     [switch]$Demo,
     [switch]$Autopilot,
+    [switch]$Mission,
     [switch]$Headless,
     [switch]$Record,
     [string]$Config = "",
@@ -31,6 +32,7 @@ if ($Config -ne "") { $argsList += @("--config", $Config) }
 if ($Backend -ne "") { $argsList += @("--backend", $Backend) }
 if ($Demo) { $argsList += "--demo" }
 if ($Autopilot) { $argsList += "--autopilot" }
+if ($Mission) { $argsList += "--mission" }
 if ($Headless) { $argsList += "--headless" }
 if ($Record) { $argsList += "--record" }
 if ($ExtraArgs.Count -gt 0) { $argsList += $ExtraArgs }

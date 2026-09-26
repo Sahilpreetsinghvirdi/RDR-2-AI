@@ -105,15 +105,40 @@ DEFAULT_CONTROL_KEYS: dict[str, str] = {
 
 
 @dataclass
+class NavConfig:
+    """Route navigation (Phase 4): dead-reckoned legs with stall detection."""
+
+    start_heading_deg: float = 0.0    # heading of the camera when the agent starts
+    walk_speed_mps: float = 1.6       # assumed on-foot speed for progress tracking
+    heading_tol_deg: float = 5.0      # bearing error considered "faced"
+    step_s: float = 0.5               # forward burst length per control tick
+    sprint_after_m: float = 6.0       # remaining distance that triggers sprint
+    stall_flow_eps: float = 0.5       # minimap px/frame below this = not moving
+    stall_timeout_s: float = 3.0      # walking with no flow this long = blocked
+    legs: list[list[float]] = field(default_factory=list)  # [bearing_deg, meters]
+
+
+@dataclass
+class MissionConfig:
+    """Mission/task framework (Phase 5): ordered steps run by the autopilot."""
+
+    enabled: bool = False
+    loop: bool = False          # restart the task list after it completes
+    tasks: list[dict[str, object]] = field(default_factory=list)
+
+
+@dataclass
 class ControlConfig:
     """Locomotion control (Phase 4): movement keys, look sensitivity, clamps."""
 
-    enabled: bool = False          # scripted autopilot; off = agent only observes
+    enabled: bool = False          # autopilot; off = agent only observes
+    mode: str = "script"           # script = fixed demo cycle, route = nav.legs
     keys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_CONTROL_KEYS))
     mouse_px_per_degree: float = 12.0   # camera look sensitivity (game mouse dpi varies)
     max_turn_deg_per_tick: float = 30.0  # camera step clamp per control tick
     min_step_s: float = 0.1
     max_step_s: float = 4.0             # clamp for a single move command
+    nav: NavConfig = field(default_factory=NavConfig)
 
 
 @dataclass
@@ -238,6 +263,7 @@ class AppConfig:
     input: InputConfig = field(default_factory=InputConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
+    mission: MissionConfig = field(default_factory=MissionConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
@@ -340,6 +366,41 @@ class AppConfig:
             problems.append("control.max_turn_deg_per_tick must be > 0")
         if ctrl.min_step_s <= 0 or ctrl.max_step_s < ctrl.min_step_s:
             problems.append("control step clamps require 0 < min_step_s <= max_step_s")
+        if ctrl.mode not in {"script", "route"}:
+            problems.append(f"control.mode must be script|route, got {ctrl.mode!r}")
+        nav = ctrl.nav
+        for name in ("walk_speed_mps", "heading_tol_deg", "step_s",
+                     "stall_flow_eps", "stall_timeout_s"):
+            if getattr(nav, name) <= 0:
+                problems.append(f"control.nav.{name} must be > 0")
+        if nav.sprint_after_m < 0:
+            problems.append("control.nav.sprint_after_m must be >= 0")
+        if not isinstance(nav.legs, list):
+            problems.append("control.nav.legs must be a list of [bearing_deg, meters]")
+        else:
+            for i, leg in enumerate(nav.legs):
+                if (
+                    not isinstance(leg, (list, tuple)) or len(leg) != 2
+                    or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                               for v in leg)
+                ):
+                    problems.append(
+                        f"control.nav.legs[{i}] must be [bearing_deg, meters]"
+                    )
+                elif leg[1] <= 0:
+                    problems.append(f"control.nav.legs[{i}] meters must be > 0")
+        if ctrl.mode == "route" and not nav.legs:
+            problems.append("control.mode=route requires at least one control.nav.legs entry")
+        mission = self.mission
+        if mission.enabled and not mission.tasks:
+            problems.append("mission.enabled requires at least one mission.tasks entry")
+        if mission.tasks:
+            from src.mission.tasks import parse_tasks  # lazy: keep config import-light
+
+            try:
+                parse_tasks(list(mission.tasks))
+            except ValueError as exc:
+                problems.append(str(exc))
         if not isinstance(self.telemetry.log_level, str):
             problems.append("telemetry.log_level must be a string")
 

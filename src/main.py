@@ -26,6 +26,8 @@ from src.config import AppConfig, ConfigError, load_config, save_effective_confi
 from src.control.locomotion import LocomotionController
 from src.demo import Phase1Demo
 from src.input.input_controller import InputController
+from src.mission.runner import MissionRunner
+from src.planning.route import RoutePlanner
 from src.planning.scripted import ScriptedPlanner
 from src.safety.emergency_stop import EmergencyStop
 from src.safety.state_machine import AgentState, StateMachine
@@ -56,6 +58,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--autopilot", action="store_true",
         help="enable the Phase 4 scripted locomotion autopilot",
     )
+    parser.add_argument(
+        "--mission", action="store_true",
+        help="run the configured mission task list (Phase 5)",
+    )
     parser.add_argument("--headless", action="store_true", help="disable the debug window")
     parser.add_argument("--record", action="store_true", help="record frames to disk")
     parser.add_argument(
@@ -79,6 +85,9 @@ def _apply_cli_overrides(cfg: AppConfig, args: argparse.Namespace) -> None:
         cfg.capture.backend = args.backend
     if args.autopilot:
         cfg.control.enabled = True
+        cfg.validate()
+    if args.mission:
+        cfg.mission.enabled = True
         cfg.validate()
 
 
@@ -110,10 +119,26 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         stop_event=machine.stop_event,
     )
     locomotion = LocomotionController(cfg.control, input_ctrl)
-    planner: ScriptedPlanner | None = None
-    if cfg.control.enabled:
-        planner = ScriptedPlanner(cfg.control, locomotion)
-        log.info("autopilot enabled - scripted locomotion active while RUNNING")
+    planner: ScriptedPlanner | RoutePlanner | MissionRunner | None = None
+    if cfg.mission.enabled:
+        planner = MissionRunner(
+            cfg.mission, cfg.control, locomotion,
+            cfg.vision.hud.regions.get("minimap"),
+        )
+        log.info("mission enabled - %d tasks%s", len(cfg.mission.tasks),
+                 ", looping" if cfg.mission.loop else "")
+    elif cfg.control.enabled:
+        if cfg.control.mode == "route":
+            planner = RoutePlanner(
+                cfg.control, locomotion, cfg.vision.hud.regions.get("minimap")
+            )
+            log.info(
+                "autopilot enabled - following %d route legs",
+                len(cfg.control.nav.legs),
+            )
+        else:
+            planner = ScriptedPlanner(cfg.control, locomotion)
+            log.info("autopilot enabled - scripted locomotion active while RUNNING")
 
     events_path = cfg.resolve(cfg.telemetry.dir) / cfg.telemetry.events_file
     events = EventLog(events_path if cfg.telemetry.file else None)
@@ -165,7 +190,7 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
                     "loop_hz": cfg.agent.loop_hz,
                     "phase": cfg.agent.phase,
                     "demo": bool(args.demo),
-                    "autopilot": bool(cfg.control.enabled),
+                    "autopilot": bool(cfg.control.enabled or cfg.mission.enabled),
                 }
             )
         if cfg.debug.gui:
@@ -279,7 +304,7 @@ def _agent_loop(
     demo: Phase1Demo | None,
     started: float,
     locomotion: LocomotionController,
-    planner: ScriptedPlanner | None,
+    planner: ScriptedPlanner | RoutePlanner | MissionRunner | None,
 ) -> int:
     period = 1.0 / max(1.0, cfg.agent.loop_hz)
     hz = 0.0
@@ -398,7 +423,7 @@ def _run_active_work(
     demo: Phase1Demo | None,
     events: EventLog,
     locomotion: LocomotionController,
-    planner: ScriptedPlanner | None,
+    planner: ScriptedPlanner | RoutePlanner | MissionRunner | None,
 ) -> PerceptionResult | None:
     if info is None:
         locomotion.stop()
@@ -473,7 +498,7 @@ def _run_active_work(
     if demo is not None and demo.active:
         demo.step(status)
     elif planner is not None:
-        planner.step(time.monotonic(), status)
+        planner.step(time.monotonic(), status, packet.image, game_state)
     elif demo is not None:
         status.update(goal=f"IDLE (phase {cfg.agent.phase})", action="none")
 

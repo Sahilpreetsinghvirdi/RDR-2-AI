@@ -82,9 +82,33 @@ code into the game, or interact with Red Dead Online.
 - Autopilot is **off by default** (`control.enabled: false` or `--autopilot`).
   While active it still only runs in `RUNNING`, and input stops when the game
   window is missing or unfocused, on pause/takeover/F12, and on shutdown.
+- Route navigation (`control.mode: route`): `src/planning/route.py` follows
+  `[bearing_deg, meters]` legs from `control.nav.legs` - turns to each bearing
+  with clamped mouse steps, walks in short bursts while dead-reckoning
+  distance, auto-sprints beyond `sprint_after_m`, and marks a leg **blocked**
+  when the minimap stops moving (optical flow under `stall_flow_eps` for
+  `stall_timeout_s`) instead of walking in place. Completion shows as
+  `ROUTE n/N` / `ROUTE ARRIVED` in the status panel.
 - Window matching hardened: `window.match: exact` requires the whole title to
   equal a pattern (browser tabs mentioning the game no longer match), and
   console/terminal/browser window classes are always excluded.
+
+### Phase 5 - mission/task framework
+- New `src/mission/tasks.py`: config-declared tasks - `turn` (relative
+  degrees), `walk` (meters, optional bearing), `wait` (seconds),
+  `wait_for` (dotted GameState field equals a value, optional timeout),
+  `interact` (tap E), `log` (marker). Strict parsing at startup: a bad task
+  is a config error naming `mission.tasks[i]`, never a runtime surprise.
+- New `src/mission/runner.py`: `MissionRunner` executes the list one control
+  tick at a time, duck-typed with the other planners. Walking reuses the
+  single-leg route planner (same clamps and stall detection); turning uses
+  the same clamped mouse steps; heading carries across tasks.
+- Failure policy: a refused key, blocked walk, or `wait_for` timeout parks
+  the mission as `MISSION FAILED` with the reason, releases all input, and
+  never auto-retries. Success shows `MISSION n/N` then `MISSION DONE`
+  (`mission.loop: true` restarts the list instead).
+- Enabled via `mission.enabled: true` or `--mission`; takes precedence over
+  `control.mode`. Off by default.
 
 ## Architecture
 
@@ -125,13 +149,17 @@ src/
     locomotion.py      Phase 4 tick-based movement holds and camera turns
   planning/
     scripted.py        Phase 4 scripted autopilot (look/walk cycle)
-  ai/ ai/rl/ mission/  reserved for later phases
+    route.py           Phase 4 route navigation (bearing/distance legs)
+  mission/
+    tasks.py           Phase 5 task model + config parser
+    runner.py          Phase 5 mission executor (MISSION n/N status)
+  ai/ ai/rl/           reserved for later phases
 tools/
   calibrate_capture.py measure capture fps/latency
   calibrate_hud.py     live HUD detection preview for region tuning
   inspect_frames.py    save sample frames for verification
   input_check.py       test keyboard/mouse injection
-tests/                 221 tests (pytest)
+tests/                 272 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -202,8 +230,8 @@ HUD elements (leave a small margin around each core).
 ```
 
 CLI flags: `--config`, `--set KEY=VALUE` (repeatable), `--demo`, `--autopilot`,
-`--headless`, `--record`, `--backend {auto,dxcam,mss,synthetic}`,
-`--duration N`, `--version`.
+`--mission`, `--headless`, `--record`,
+`--backend {auto,dxcam,mss,synthetic}`, `--duration N`, `--version`.
 
 ## Emergency stop
 
@@ -243,7 +271,8 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | `capture`   | backend, `target_fps`, `color_order`, `roi_mode`, synthetic size |
 | `input`     | `keyboard_mode` (scancode/virtual_key), hold/verify timing, clamps |
 | `safety`    | F12/F11/F10 bindings, watchdog stalls, startup grace, release rules |
-| `control`   | autopilot on/off, movement/action keys, look sensitivity, turn/move clamps |
+| `control`   | autopilot on/off, `mode` (script/route), movement keys, look sensitivity, `nav` legs/gains/stalls |
+| `mission`   | task list (`turn`/`walk`/`wait`/`wait_for`/`interact`/`log`), `loop` restart |
 | `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators, `ocr` engine/throttling |
 | `debug`     | dashboard window, `show_overlay`/`show_hud` boxes, panel width |
 | `recording` | fps, format, max frames, state jsonl |
@@ -277,10 +306,12 @@ synthetic backend ~24 fps, ~3 ms latency.
    wanted stars, pluggable OCR, richer overlay and telemetry.
 3. **Phase 3 (done)** - world state estimation: minimap markers/terrain
    hints, sky time-of-day and weather, ammo via OCR, horse cores.
-4. **Phase 4 (in progress)** - navigation and locomotion control (mouse
-   look, movement): locomotion controller and scripted autopilot are in;
-   goal-driven navigation still to come.
-5. **Phase 5** - mission/task framework and goal management.
+4. **Phase 4 (done)** - navigation and locomotion control (mouse look,
+   movement): locomotion controller, scripted autopilot, and route
+   navigation with minimap stall detection.
+5. **Phase 5 (done)** - mission/task framework and goal management: config
+   tasks executed in order with blocking waits, state conditions and a
+   fail-stop policy.
 6. **Phase 6** - dialogue, encounters, and camp interactions.
 7. **Phase 7** - combat and self-defense behaviors.
 8. **Phase 8** - survival systems (food, camp, crafting, economy).
@@ -312,7 +343,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 221 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 272 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 ```
 
