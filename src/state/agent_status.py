@@ -43,6 +43,11 @@ class AgentStatus:
     hud_labels: list[str] = field(default_factory=list)
     hud_ms: float = 0.0
     ocr_engine: str = "off"
+    world_time: str | None = None
+    world_weather: str | None = None
+    world_ammo: int | None = None
+    world_horse_detected: bool = False
+    world_ms: float = 0.0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

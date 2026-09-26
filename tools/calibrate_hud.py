@@ -72,6 +72,30 @@ def _reading_line(name: str, reading: RegionReading | None) -> str:
             f"box={tuple(reading.bbox)}")
 
 
+def _print_world(world) -> None:
+    if world.skipped:
+        print("  world      disabled")
+        return
+    sky, weapon, horse, mm = world.sky, world.weapon, world.horse, world.minimap
+    time_of_day = sky.time_of_day if sky is not None else "--"
+    weather = sky.weather if sky is not None else "--"
+    ammo = "?" if weapon is None or weapon.ammo is None else weapon.ammo
+    horse_line = "--" if horse is None or not horse.detected else (
+        f"hp={_pct_short(horse.health)} st={_pct_short(horse.stamina)}"
+    )
+    minimap_line = "missing" if mm is None else (
+        f"marker={'Y' if mm.marker_present else 'N'} "
+        f"water={mm.water_frac:.2f} road={mm.road_frac:.2f} green={mm.green_frac:.2f}"
+    )
+    print(f"  world      sky={time_of_day}/{weather}  ammo={ammo}  "
+          f"horse={horse_line}  minimap={minimap_line}  "
+          f"{world.latency_ms:.1f}ms")
+
+
+def _pct_short(value: float | None) -> str:
+    return "--" if value is None else f"{value * 100:.0f}%"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     cfg = load_config(args.config)
@@ -134,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
                                     if name in detection.gauges
                                     else getattr(detection, name, None)))
             print(f"  scaled boxes: {boxes}")
+            _print_world(pres.world)
         path = out_dir / f"hud_{packet.frame_id:06d}.jpg"
         cv2.imwrite(str(path), _annotated(packet.image, detection),
                     [cv2.IMWRITE_JPEG_QUALITY, 92])

@@ -45,7 +45,7 @@ def test_apply_to_state_leaves_undetected_fields_none() -> None:
     assert state.player.stamina is None
     assert state.confidence.player == 0.0
     assert state.frame_id == 1
-    assert state.source == "hud"
+    assert state.source == "hud+world"
 
 
 def test_gauges_flow_into_state_with_confidence() -> None:

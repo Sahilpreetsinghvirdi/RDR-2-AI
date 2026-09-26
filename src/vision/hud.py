@@ -121,7 +121,7 @@ def _to_gray(crop: np.ndarray) -> np.ndarray | None:
     return None
 
 
-def _read_gauge(crop: np.ndarray, cfg: HudConfig) -> tuple[float | None, float]:
+def read_gauge(crop: np.ndarray, cfg: HudConfig) -> tuple[float | None, float]:
     """Ring fill of a circular core gauge: (value 0..1 | None, confidence)."""
     gray = _to_gray(crop)
     if gray is None:
@@ -303,7 +303,7 @@ class HudReader:
                 continue
             x, y, w, h = box
             crop = frame[y:y + h, x:x + w]
-            value, conf = _read_gauge(crop, self._cfg)
+            value, conf = read_gauge(crop, self._cfg)
             if conf < self._cfg.gauge_min_confidence:
                 value = None
             reading = RegionReading(

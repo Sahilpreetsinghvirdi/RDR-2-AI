@@ -1,6 +1,6 @@
-"""RDR2 AI - Phase 2 agent entry point.
+"""RDR2 AI - Phase 3 agent entry point.
 
-Closed loop: capture -> fast vision + HUD perception (OCR when available)
+Closed loop: capture -> fast vision + HUD/world perception (OCR when available)
 -> guarded input -> observe. Emergency stop F12, pause F11, human takeover F10.
 """
 
@@ -23,8 +23,10 @@ from src.capture.window_manager import (
     make_focus_check,
 )
 from src.config import AppConfig, ConfigError, load_config, save_effective_config
+from src.control.locomotion import LocomotionController
 from src.demo import Phase1Demo
 from src.input.input_controller import InputController
+from src.planning.scripted import ScriptedPlanner
 from src.safety.emergency_stop import EmergencyStop
 from src.safety.state_machine import AgentState, StateMachine
 from src.safety.watchdog import HeartbeatRegistry, Watchdog
@@ -34,7 +36,7 @@ from src.telemetry.logger import EventLog, setup_logging
 from src.telemetry.recorder import SessionRecorder
 from src.ui.dashboard import Dashboard
 from src.vision.fast_pass import FastPass
-from src.vision.perception import Perception, PerceptionResult, hud_summary
+from src.vision.perception import Perception, PerceptionResult, hud_summary, world_summary
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ log = logging.getLogger(__name__)
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="rdr2-ai",
-        description="Autonomous AI player foundation for RDR2 Story Mode (Phase 2).",
+        description="Autonomous AI player foundation for RDR2 Story Mode (Phase 3).",
     )
     parser.add_argument("--config", default=None, help="path to config.yaml")
     parser.add_argument(
@@ -50,6 +52,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="override a config value (repeatable), e.g. --set capture.target_fps=60",
     )
     parser.add_argument("--demo", action="store_true", help="run the Phase 1 input demo")
+    parser.add_argument(
+        "--autopilot", action="store_true",
+        help="enable the Phase 4 scripted locomotion autopilot",
+    )
     parser.add_argument("--headless", action="store_true", help="disable the debug window")
     parser.add_argument("--record", action="store_true", help="record frames to disk")
     parser.add_argument(
@@ -71,6 +77,8 @@ def _apply_cli_overrides(cfg: AppConfig, args: argparse.Namespace) -> None:
         cfg.recording.enabled = True
     if args.backend:
         cfg.capture.backend = args.backend
+    if args.autopilot:
+        cfg.control.enabled = True
         cfg.validate()
 
 
@@ -101,6 +109,11 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         allow_input=allow_input,
         stop_event=machine.stop_event,
     )
+    locomotion = LocomotionController(cfg.control, input_ctrl)
+    planner: ScriptedPlanner | None = None
+    if cfg.control.enabled:
+        planner = ScriptedPlanner(cfg.control, locomotion)
+        log.info("autopilot enabled - scripted locomotion active while RUNNING")
 
     events_path = cfg.resolve(cfg.telemetry.dir) / cfg.telemetry.events_file
     events = EventLog(events_path if cfg.telemetry.file else None)
@@ -152,6 +165,7 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
                     "loop_hz": cfg.agent.loop_hz,
                     "phase": cfg.agent.phase,
                     "demo": bool(args.demo),
+                    "autopilot": bool(cfg.control.enabled),
                 }
             )
         if cfg.debug.gui:
@@ -174,6 +188,7 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         rc = _agent_loop(
             cfg, args, machine, heartbeats, wm, capture, fast, perception,
             game_state, status, input_ctrl, recorder, events, demo, started,
+            locomotion, planner,
         )
     except KeyboardInterrupt:
         log.warning("interrupted by user (Ctrl+C)")
@@ -263,6 +278,8 @@ def _agent_loop(
     events: EventLog,
     demo: Phase1Demo | None,
     started: float,
+    locomotion: LocomotionController,
+    planner: ScriptedPlanner | None,
 ) -> int:
     period = 1.0 / max(1.0, cfg.agent.loop_hz)
     hz = 0.0
@@ -311,9 +328,10 @@ def _agent_loop(
         if state is AgentState.RUNNING:
             last_pres = _run_active_work(
                 cfg, capture, fast, perception, game_state, packet, info, status,
-                input_ctrl, recorder, demo, events,
+                input_ctrl, recorder, demo, events, locomotion, planner,
             )
         else:
+            locomotion.stop()
             status.update(
                 state=state.value,
                 action="none",
@@ -353,6 +371,7 @@ def _agent_loop(
                 input=input_ctrl.snapshot(),
                 window="found" if info is not None else "missing",
                 hud=hud_summary(last_pres) if last_pres is not None else None,
+                world=world_summary(last_pres) if last_pres is not None else None,
             )
             log.debug(
                 "metrics: %.1f Hz, capture %.1f fps (%.1f ms), vision %.1f ms, input %s",
@@ -378,11 +397,15 @@ def _run_active_work(
     recorder: SessionRecorder | None,
     demo: Phase1Demo | None,
     events: EventLog,
+    locomotion: LocomotionController,
+    planner: ScriptedPlanner | None,
 ) -> PerceptionResult | None:
     if info is None:
+        locomotion.stop()
         status.update(action="none", message="waiting for RDR2 window")
         return None
     if packet is None:
+        locomotion.stop()
         status.update(
             action="none",
             frame_id=0,
@@ -391,12 +414,15 @@ def _run_active_work(
         )
         return None
     if packet.age_ms > cfg.capture.max_frame_age_ms:
+        locomotion.stop()
         status.update(
             action="none", frame_age_ms=round(packet.age_ms, 1),
             message=f"stale frame ({packet.age_ms:.0f}ms > "
                     f"{cfg.capture.max_frame_age_ms}ms)",
         )
         return None
+    if not info.focused:
+        locomotion.stop()
 
     result = fast.process(packet.image)
     pres = perception.process(packet.image, packet.frame_id)
@@ -407,6 +433,9 @@ def _run_active_work(
     gauges = pres.hud.gauges
     prompt_visible = bool(pres.hud.prompt is not None and pres.hud.prompt.present)
     minimap = pres.hud.minimap
+    world = pres.world
+    sky = None if world.skipped else world.sky
+    horse = None if world.skipped else world.horse
     status.update(
         frame_id=packet.frame_id,
         frame_age_ms=round(packet.age_ms, 1),
@@ -424,6 +453,11 @@ def _run_active_work(
         hud_labels=labels,
         hud_ms=round(pres.latency_ms, 2),
         ocr_engine=pres.ocr_engine,
+        world_time=sky.time_of_day if sky is not None else None,
+        world_weather=sky.weather if sky is not None else None,
+        world_ammo=pres.ammo,
+        world_horse_detected=bool(horse is not None and horse.detected),
+        world_ms=round(world.latency_ms, 2),
         goal=(
             f"IDLE (phase {cfg.agent.phase})"
             if demo is None or not demo.active else "VERIFY_INPUT"
@@ -438,6 +472,8 @@ def _run_active_work(
 
     if demo is not None and demo.active:
         demo.step(status)
+    elif planner is not None:
+        planner.step(time.monotonic(), status)
     elif demo is not None:
         status.update(goal=f"IDLE (phase {cfg.agent.phase})", action="none")
 

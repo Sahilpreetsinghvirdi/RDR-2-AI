@@ -53,6 +53,39 @@ code into the game, or interact with Red Dead Online.
 - `.\calibrate.ps1 -Hud` runs the detectors on live frames and saves
   annotated previews so regions can be tuned to your screen layout.
 
+### Phase 3 - world state estimation
+- New `src/vision/world.py` estimators, all region-based with confidence:
+  - **Minimap**: player-marker blob (position offset), colour fractions
+    classified as water / road / vegetation -> `EnvironmentState` hints.
+  - **Sky**: top-strip luminance and warmth -> `time_of_day`
+    (day/dusk/night), uniformity -> `weather` (clear/cloudy).
+  - **Weapon**: ammo-counter visibility; the number is read via OCR
+    (throttled independently from prompt OCR) -> `player.weapon_ammo`.
+  - **Horse cores**: health/stamina rings that appear above yours when the
+    horse is nearby -> `HorseState` (`detected` only; `mounted` stays
+    unknown until a later phase proves it).
+- Detections fill `GameState.environment`, `GameState.horse` and
+  `GameState.player.weapon_ammo`; `confidence.navigation/horse` move with
+  them. Nothing is inferred beyond what is on screen.
+- Debug window: `WORLD : dusk clear ammo 24 horse Y` row, world boxes in
+  the overlay, and a `world` block in `logs/events.jsonl` metrics.
+- Config: new `vision.world` section (regions + thresholds).
+
+### Phase 4 - locomotion control (in progress)
+- New `src/control/locomotion.py`: non-blocking `LocomotionController` -
+  `move()` holds movement keys for a clamped duration (releases on `tick()`),
+  `turn()` converts degrees to clamped mouse deltas, `tap()` for jump/
+  interact, `stop()` releases everything. Commands never sleep the loop.
+- New `src/planning/scripted.py`: `ScriptedPlanner` walks a fixed
+  look-around / walk / sprint / jump cycle so the whole control path is
+  exercised before a real decision layer replaces it.
+- Autopilot is **off by default** (`control.enabled: false` or `--autopilot`).
+  While active it still only runs in `RUNNING`, and input stops when the game
+  window is missing or unfocused, on pause/takeover/F12, and on shutdown.
+- Window matching hardened: `window.match: exact` requires the whole title to
+  equal a pattern (browser tabs mentioning the game no longer match), and
+  console/terminal/browser window classes are always excluded.
+
 ## Architecture
 
 ```
@@ -78,6 +111,7 @@ src/
   vision/
     fast_pass.py       cheap grayscale downscale stats (motion/brightness)
     hud.py             region detectors: gauges, minimap, prompts, stars
+    world.py           world estimators: minimap, sky, weapon, horse
     ocr.py             pluggable OCR (tesseract) with graceful fallback
     perception.py      per-frame orchestration -> GameState
   telemetry/
@@ -87,18 +121,22 @@ src/
     dashboard.py       debug window (frame + overlay + status panel)
     debug_overlay.py   HUD-style annotations drawn on the frame
   demo.py              Phase 1 input demonstration
-  planning/ control/ ai/ ai/rl/ mission/   reserved for later phases
+  control/
+    locomotion.py      Phase 4 tick-based movement holds and camera turns
+  planning/
+    scripted.py        Phase 4 scripted autopilot (look/walk cycle)
+  ai/ ai/rl/ mission/  reserved for later phases
 tools/
   calibrate_capture.py measure capture fps/latency
   calibrate_hud.py     live HUD detection preview for region tuning
   inspect_frames.py    save sample frames for verification
   input_check.py       test keyboard/mouse injection
-tests/                 165 tests (pytest)
+tests/                 221 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
-fast-pass vision, HUD perception + OCR, planner stub, input controller) ->
-telemetry/overlay`.
+fast-pass vision, HUD perception + OCR, planner/locomotion tick, input
+controller) -> telemetry/overlay`.
 Safety paths (`emergency_stop`, `watchdog`, `input guards`) sit alongside and
 can cut input at any moment regardless of loop state.
 
@@ -122,7 +160,9 @@ This creates `.venv`, installs runtime + dev dependencies
 2. In game settings, keep the HUD enabled - Phase 1 does not require it, but
    later phases read HUD elements.
 3. Note the game window title; the default patterns are
-   `Red Dead Redemption 2` and `RDR2` (see `config.yaml`).
+   `Red Dead Redemption 2` and `RDR2`, matched **exactly** by default
+   (`window.match: exact`) so look-alike windows are never used as the
+   input target (see `config.yaml`).
 4. Start the agent and press F10 (human takeover) if you want to play
    yourself while it runs.
 
@@ -161,9 +201,9 @@ HUD elements (leave a small margin around each core).
 .\.venv\Scripts\python.exe -m src.main --set capture.target_fps=60
 ```
 
-CLI flags: `--config`, `--set KEY=VALUE` (repeatable), `--demo`, `--headless`,
-`--record`, `--backend {auto,dxcam,mss,synthetic}`, `--duration N`,
-`--version`.
+CLI flags: `--config`, `--set KEY=VALUE` (repeatable), `--demo`, `--autopilot`,
+`--headless`, `--record`, `--backend {auto,dxcam,mss,synthetic}`,
+`--duration N`, `--version`.
 
 ## Emergency stop
 
@@ -199,12 +239,13 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | Section     | Highlights |
 |-------------|------------|
 | `agent`     | loop rate (`loop_hz`), phase label |
-| `window`    | `title_patterns`, `exclude_patterns`, focus rules, poll intervals |
+| `window`    | `title_patterns`, `exclude_patterns`, `match` (exact/substring), focus rules, poll intervals |
 | `capture`   | backend, `target_fps`, `color_order`, `roi_mode`, synthetic size |
 | `input`     | `keyboard_mode` (scancode/virtual_key), hold/verify timing, clamps |
 | `safety`    | F12/F11/F10 bindings, watchdog stalls, startup grace, release rules |
-| `vision`    | `fast` pass, `hud` regions/thresholds, `ocr` engine/throttling |
-| `debug`     | dashboard window, `show_overlay`, `show_hud` boxes, panel width |
+| `control`   | autopilot on/off, movement/action keys, look sensitivity, turn/move clamps |
+| `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators, `ocr` engine/throttling |
+| `debug`     | dashboard window, `show_overlay`/`show_hud` boxes, panel width |
 | `recording` | fps, format, max frames, state jsonl |
 | `telemetry` | console/file logs, `events.jsonl`, metrics interval, log level |
 
@@ -234,9 +275,11 @@ synthetic backend ~24 fps, ~3 ms latency.
    state machine, emergency stop, watchdog, telemetry, debug dashboard.
 2. **Phase 2 (done)** - HUD/OCR perception: core gauges, minimap, prompts,
    wanted stars, pluggable OCR, richer overlay and telemetry.
-3. **Phase 3** - world state estimation (player, horse, weapons, minimap
-   navigation hints).
-4. **Phase 4** - navigation and locomotion control (mouse look, movement).
+3. **Phase 3 (done)** - world state estimation: minimap markers/terrain
+   hints, sky time-of-day and weather, ammo via OCR, horse cores.
+4. **Phase 4 (in progress)** - navigation and locomotion control (mouse
+   look, movement): locomotion controller and scripted autopilot are in;
+   goal-driven navigation still to come.
 5. **Phase 5** - mission/task framework and goal management.
 6. **Phase 6** - dialogue, encounters, and camp interactions.
 7. **Phase 7** - combat and self-defense behaviors.
@@ -252,9 +295,11 @@ hotkeys are never bypassed by later phases.
 | Symptom | Fix |
 |---------|-----|
 | `capture backend selected: mss` + slow fps | dxcam unavailable; reinstall `dxcam`, run as the same user as the desktop session. |
-| Frames are 0, log says `waiting_for_window` | RDR2 Story Mode is not running, or the title does not match `window.title_patterns`. Check `.\calibrate.ps1 -Inspect`. |
+| Frames are 0, log says `waiting_for_window` | RDR2 Story Mode is not running, or the window title is not exactly a `window.title_patterns` entry (`window.match: exact` by default). Check `.\calibrate.ps1 -Inspect`. |
 | Colors look swapped in saved frames | Set `capture.color_order` explicitly (`bgr`/`rgb`); dxcam delivers RGB, mss delivers BGRA. |
 | Cores always show `--` on the HUD row | Run `.\calibrate.ps1 -Hud`: either the HUD is hidden/the window is missing, or the boxes do not frame the cores - tighten `vision.hud.regions`. Regions dominated by bright scenery read *unknown* on purpose rather than a wrong value. |
+| `WORLD` row shows `--` time / `horse N` | Normal indoors or with the HUD hidden; tune `vision.world.regions` (sky strip, horse cores, weapon box) with `.\calibrate.ps1 -Hud`. |
+| Debug window looks wrong or mis-sized | Run `.\calibrate.ps1 -Gui`; tune `debug.panel_width` / `debug.render_fps`. `debug.show_hud: false` hides the detection boxes. |
 | No prompt text (`ocr=off` in the HUD row) | Tesseract is not installed. `winget install Mannuel.Tesseract-OCR`, reopen the shell; the engine switches to `tesseract` automatically (`vision.ocr.engine: auto`). |
 | Prompt line never appears | Raise `vision.hud.prompt_min_edge_density`/`prompt_min_bright_frac` down, check the `prompt` region with `.\calibrate.ps1 -Hud`. |
 | Input has no effect in game | Click the game window first; input is refused unless the game is focused. Try `input.keyboard_mode: virtual_key` if scancodes are ignored. |
@@ -267,7 +312,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 165 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 221 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 ```
 

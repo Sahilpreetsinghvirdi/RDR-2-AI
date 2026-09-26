@@ -111,6 +111,24 @@ def enable_dpi_awareness() -> str:
     return "unaware"
 
 
+_BLOCKED_CLASSES = frozenset({
+    "consolewindowclass",          # cmd / PowerShell / python consoles
+    "cascadia_hosting_window_class",  # Windows Terminal
+    "chrome_widgetwin_1",          # Chrome / Edge / any chromium browser
+    "mozillawindowclass",          # Firefox
+    "applicationframewindow",      # UWP shell windows
+    "#32770",                      # common dialog boxes
+    "cabinetwclass",               # file explorer
+})
+
+
+def _is_blocked_class(hwnd: int) -> bool:
+    """True for console/terminal windows that only mention the game in a path."""
+    buf = ctypes.create_unicode_buffer(128)
+    user32.GetClassNameW(hwnd, buf, 128)
+    return buf.value.lower() in _BLOCKED_CLASSES
+
+
 class GameWindowManager:
     """Finds and tracks the RDR2 window; never guesses when it is missing."""
 
@@ -126,10 +144,12 @@ class GameWindowManager:
         low = title.lower()
         if any(pat in low for pat in self._excluded):
             return False
+        if self._cfg.match == "exact":
+            return low in self._patterns
         return any(pat in low for pat in self._patterns)
 
     def _read_info(self, hwnd: int) -> WindowInfo | None:
-        if not user32.IsWindow(hwnd):
+        if not user32.IsWindow(hwnd) or _is_blocked_class(hwnd):
             return None
         length = user32.GetWindowTextLengthW(hwnd)
         buf = ctypes.create_unicode_buffer(length + 1)
@@ -163,7 +183,7 @@ class GameWindowManager:
         matches: list[int] = []
 
         def _cb(hwnd: int, _lparam: int) -> bool:
-            if not user32.IsWindowVisible(hwnd):
+            if not user32.IsWindowVisible(hwnd) or _is_blocked_class(hwnd):
                 return True
             length = user32.GetWindowTextLengthW(hwnd)
             if length == 0:

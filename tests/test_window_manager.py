@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from src.capture.window_manager import (
     GameWindowManager,
     Rect,
@@ -11,7 +13,7 @@ from src.capture.window_manager import (
     enable_dpi_awareness,
     make_focus_check,
 )
-from src.config import WindowConfig
+from src.config import AppConfig, ConfigError, WindowConfig
 
 
 def test_rect_properties() -> None:
@@ -42,6 +44,28 @@ def test_debug_window_is_excluded_from_title_match() -> None:
     assert wm._match("rdr2 ai - debug") is False
     assert wm._match("Red Dead Redemption 2") is True
     assert wm._match("RDR2") is True
+
+
+def test_exact_match_rejects_lookalike_titles() -> None:
+    wm = GameWindowManager(WindowConfig())
+    assert wm._match(
+        "I Installed 70 Red Dead Redemption 2 Mods.. - YouTube - Google Chrome"
+    ) is False
+    assert wm._match("Red Dead Redemption 2 - Photo Mode") is False
+    assert wm._match("my RDR2 shortcuts") is False
+
+
+def test_substring_match_mode_accepts_partial_titles() -> None:
+    wm = GameWindowManager(WindowConfig(match="substring"))
+    assert wm._match("Red Dead Redemption 2 - Photo Mode") is True
+    assert wm._match("completely unrelated title") is False
+
+
+def test_invalid_match_mode_rejected() -> None:
+    cfg = AppConfig()
+    cfg.window.match = "fuzzy"
+    with pytest.raises(ConfigError, match="window.match"):
+        cfg.validate()
 
 
 def test_wait_for_window_times_out() -> None:

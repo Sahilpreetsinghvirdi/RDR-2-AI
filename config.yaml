@@ -3,17 +3,22 @@
 
 agent:
   name: rdr2-ai
-  phase: 2
+  phase: 4
   loop_hz: 10.0          # main decision-loop rate
 
 window:
-  # Case-insensitive substrings used to find the game window.
+  # Titles used to find the game window.
   title_patterns:
     - "Red Dead Redemption 2"
     - "RDR2"
   # Never treat these (our own debug window contains "RDR2").
   exclude_patterns:
     - "RDR2 AI - Debug"
+  match: exact                # exact = whole title must equal a pattern.
+                              # A substring match would also accept browser
+                              # tabs such as "... Red Dead Redemption 2 ...".
+                              # Switch to "substring" only if your game
+                              # window title differs and you accept the risk.
   focus_before_input: true   # never send input unless the game window is focused
   poll_interval_s: 0.5       # how often the window is re-detected
   focus_timeout_s: 1.5       # time allowed to focus the window before input is refused
@@ -54,6 +59,21 @@ safety:
   startup_grace_s: 10.0      # no stall faults during startup
   release_on_pause: true
 
+control:
+  enabled: false               # autopilot locomotion (off = observe only)
+  keys:
+    forward: w
+    back: s
+    strafe_left: a
+    strafe_right: d
+    sprint: shift
+    jump: space
+    interact: e
+  mouse_px_per_degree: 12.0    # camera look sensitivity (raise for fast flicks)
+  max_turn_deg_per_tick: 30.0  # hard cap on camera turn per control tick
+  min_step_s: 0.1              # shortest single move command
+  max_step_s: 4.0              # longest single move command (clamped)
+
 vision:
   fast:
     enabled: true
@@ -84,6 +104,27 @@ vision:
     every_n_frames: 5       # OCR only when a prompt is visible, at 1/N of loop rate
     languages: eng
     min_confidence: 40      # discard OCR results below this confidence (0-100)
+  world:
+    enabled: true
+    # Extra regions (fractions of the frame) for Phase 3 world estimation.
+    # The minimap analysis reuses vision.hud.regions.minimap.
+    regions:
+      horse_health:  [0.185, 0.830, 0.055, 0.070]  # horse core (above yours)
+      horse_stamina: [0.245, 0.830, 0.055, 0.070]
+      weapon:        [0.860, 0.100, 0.120, 0.080]  # ammo counter (top-right)
+      sky:           [0.000, 0.000, 1.000, 0.120]  # top strip for time/weather
+    marker_bright: 200        # minimap player-marker brightness threshold
+    marker_min_blob_px: 8
+    marker_max_blob_px: 600
+    road_luma: 150.0          # minimap road/markings are bright and warm
+    water_min_frac: 0.04      # blue pixel fraction -> water_detected
+    road_min_frac: 0.03       # bright-warm pixel fraction -> road_detected
+    green_min_frac: 0.45      # green fraction -> wilderness
+    night_luma: 45.0          # sky below this is night
+    dusk_warmth: 15.0         # R > B + this on a lit sky -> dusk/dawn
+    sky_max_std: 35.0         # sky uniformity for clear vs cloudy
+    ammo_min_bright_frac: 0.004
+    ammo_min_luma: 170.0
 
 debug:
   gui: true

@@ -27,6 +27,14 @@ def _pct(value: float | None) -> str:
     return f"{value * 100:.0f}%"
 
 
+def _world_line(status: AgentStatus) -> str:
+    time_part = status.world_time or "--"
+    weather = status.world_weather or "--"
+    ammo = "--" if status.world_ammo is None else str(status.world_ammo)
+    horse = "Y" if status.world_horse_detected else "N"
+    return f"{time_part} {weather} ammo {ammo} horse {horse}  {status.world_ms:.1f}ms"
+
+
 def build_lines(status: AgentStatus) -> list[str]:
     """Human-readable status lines shared by overlay and side panel."""
     bounds = status.window_bounds
@@ -51,6 +59,7 @@ def build_lines(status: AgentStatus) -> list[str]:
         f"HUD    : HP {_pct(status.hud_health)} ST {_pct(status.hud_stamina)} "
         f"DE {_pct(status.hud_dead_eye)}  map {minimap}  "
         f"{status.hud_ms:.1f}ms  ocr={status.ocr_engine}",
+        "WORLD  : " + _world_line(status),
         f"LOOP   : {status.loop_hz:.1f} Hz   input lat {status.input_latency_ms:.1f}ms",
         "HELD   : " + held,
         f"GOAL   : {status.goal}   ACTION: {status.action}",

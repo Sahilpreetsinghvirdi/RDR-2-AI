@@ -2,11 +2,13 @@
 # Examples:
 #   .\run.ps1
 #   .\run.ps1 -Demo
+#   .\run.ps1 -Autopilot
 #   .\run.ps1 -Headless -Record
 #   .\run.ps1 -Backend mss -ExtraArgs @("--duration","30")
 
 param(
     [switch]$Demo,
+    [switch]$Autopilot,
     [switch]$Headless,
     [switch]$Record,
     [string]$Config = "",
@@ -28,6 +30,7 @@ $argsList = @("-m", "src.main")
 if ($Config -ne "") { $argsList += @("--config", $Config) }
 if ($Backend -ne "") { $argsList += @("--backend", $Backend) }
 if ($Demo) { $argsList += "--demo" }
+if ($Autopilot) { $argsList += "--autopilot" }
 if ($Headless) { $argsList += "--headless" }
 if ($Record) { $argsList += "--record" }
 if ($ExtraArgs.Count -gt 0) { $argsList += $ExtraArgs }

@@ -36,6 +36,8 @@ class WindowConfig:
     exclude_patterns: list[str] = field(
         default_factory=lambda: ["RDR2 AI - Debug"]
     )
+    match: str = "exact"    # exact = whole title must equal a pattern (safe);
+                            # substring = pattern anywhere in the title
     focus_before_input: bool = True
     poll_interval_s: float = 0.5
     focus_timeout_s: float = 1.5
@@ -91,6 +93,29 @@ class SafetyConfig:
     release_on_pause: bool = True
 
 
+DEFAULT_CONTROL_KEYS: dict[str, str] = {
+    "forward": "w",
+    "back": "s",
+    "strafe_left": "a",
+    "strafe_right": "d",
+    "sprint": "shift",
+    "jump": "space",
+    "interact": "e",
+}
+
+
+@dataclass
+class ControlConfig:
+    """Locomotion control (Phase 4): movement keys, look sensitivity, clamps."""
+
+    enabled: bool = False          # scripted autopilot; off = agent only observes
+    keys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_CONTROL_KEYS))
+    mouse_px_per_degree: float = 12.0   # camera look sensitivity (game mouse dpi varies)
+    max_turn_deg_per_tick: float = 30.0  # camera step clamp per control tick
+    min_step_s: float = 0.1
+    max_step_s: float = 4.0             # clamp for a single move command
+
+
 @dataclass
 class FastPassConfig:
     enabled: bool = True
@@ -135,11 +160,41 @@ class OcrConfig:
     min_confidence: float = 40.0  # 0..100, engine confidence scale
 
 
+DEFAULT_WORLD_REGIONS: dict[str, list[float]] = {
+    # x, y, w, h as fractions of the frame (reference layout 1920x1080).
+    "horse_health": [0.185, 0.830, 0.055, 0.070],
+    "horse_stamina": [0.245, 0.830, 0.055, 0.070],
+    "weapon": [0.860, 0.100, 0.120, 0.080],
+    "sky": [0.0, 0.0, 1.0, 0.120],
+}
+
+
+@dataclass
+class WorldConfig:
+    enabled: bool = True
+    regions: dict[str, list[float]] = field(
+        default_factory=lambda: copy.deepcopy(DEFAULT_WORLD_REGIONS)
+    )
+    marker_bright: int = 200
+    marker_min_blob_px: int = 8
+    marker_max_blob_px: int = 600
+    road_luma: float = 150.0
+    water_min_frac: float = 0.04
+    road_min_frac: float = 0.03
+    green_min_frac: float = 0.45
+    night_luma: float = 45.0
+    dusk_warmth: float = 15.0
+    sky_max_std: float = 35.0
+    ammo_min_bright_frac: float = 0.004
+    ammo_min_luma: float = 170.0
+
+
 @dataclass
 class VisionConfig:
     fast: FastPassConfig = field(default_factory=FastPassConfig)
     hud: HudConfig = field(default_factory=HudConfig)
     ocr: OcrConfig = field(default_factory=OcrConfig)
+    world: WorldConfig = field(default_factory=WorldConfig)
 
 
 @dataclass
@@ -182,6 +237,7 @@ class AppConfig:
     capture: CaptureConfig = field(default_factory=CaptureConfig)
     input: InputConfig = field(default_factory=InputConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
+    control: ControlConfig = field(default_factory=ControlConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
@@ -247,6 +303,10 @@ class AppConfig:
             )
         if not isinstance(self.window.title_patterns, list) or not self.window.title_patterns:
             problems.append("window.title_patterns must be a non-empty list")
+        if self.window.match not in {"exact", "substring"}:
+            problems.append(
+                f"window.match must be exact|substring, got {self.window.match!r}"
+            )
         if self.vision.ocr.engine not in {"auto", "tesseract", "off"}:
             problems.append(
                 f"vision.ocr.engine must be auto|tesseract|off, got {self.vision.ocr.engine!r}"
@@ -254,29 +314,32 @@ class AppConfig:
         _positive("vision.ocr.every_n_frames", self.vision.ocr.every_n_frames, (int,))
         if not 0 <= self.vision.ocr.min_confidence <= 100:
             problems.append("vision.ocr.min_confidence must be within 0..100")
-        if not isinstance(self.vision.hud.regions, dict):
-            problems.append("vision.hud.regions must be a mapping of name -> [x,y,w,h]")
-        else:
-            for name, frac in self.vision.hud.regions.items():
-                if (
-                    not isinstance(frac, (list, tuple)) or len(frac) != 4
-                    or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
-                               for v in frac)
-                ):
-                    problems.append(
-                        f"vision.hud.regions.{name} must be [x, y, w, h] numbers"
-                    )
-                    continue
-                x, y, w, h = (float(v) for v in frac)
-                if not (0.0 <= x < 1.0 and 0.0 <= y < 1.0 and 0.0 < w <= 1.0
-                        and 0.0 < h <= 1.0 and x + w <= 1.0001 and y + h <= 1.0001):
-                    problems.append(
-                        f"vision.hud.regions.{name} out of range (fractions of the frame)"
-                    )
+        _check_regions(self.vision.hud.regions, "vision.hud.regions", problems)
         if not 0.0 <= self.vision.hud.gauge_min_confidence <= 1.0:
             problems.append("vision.hud.gauge_min_confidence must be within 0..1")
+        _check_regions(self.vision.world.regions, "vision.world.regions", problems)
+        for name in ("water_min_frac", "road_min_frac", "green_min_frac",
+                     "ammo_min_bright_frac"):
+            value = getattr(self.vision.world, name)
+            if not 0.0 <= value <= 1.0:
+                problems.append(f"vision.world.{name} must be within 0..1")
         if not isinstance(self.agent.phase, int) or self.agent.phase < 1:
             problems.append(f"agent.phase must be an int >= 1, got {self.agent.phase!r}")
+        ctrl = self.control
+        missing = set(DEFAULT_CONTROL_KEYS) - set(ctrl.keys)
+        extra = set(ctrl.keys) - set(DEFAULT_CONTROL_KEYS)
+        if missing:
+            problems.append(f"control.keys missing {sorted(missing)}")
+        if extra:
+            problems.append(f"control.keys unknown {sorted(extra)}")
+        if any(not isinstance(v, str) or not v.strip() for v in ctrl.keys.values()):
+            problems.append("control.keys values must be non-empty strings")
+        if ctrl.mouse_px_per_degree <= 0:
+            problems.append("control.mouse_px_per_degree must be > 0")
+        if ctrl.max_turn_deg_per_tick <= 0:
+            problems.append("control.max_turn_deg_per_tick must be > 0")
+        if ctrl.min_step_s <= 0 or ctrl.max_step_s < ctrl.min_step_s:
+            problems.append("control step clamps require 0 < min_step_s <= max_step_s")
         if not isinstance(self.telemetry.log_level, str):
             problems.append("telemetry.log_level must be a string")
 
@@ -328,6 +391,24 @@ def _build(cls: type, data: dict[str, Any], warnings: list[str]) -> Any:
         else:
             kwargs[name] = value
     return cls(**kwargs)
+
+
+def _check_regions(regions: Any, where: str, problems: list[str]) -> None:
+    if not isinstance(regions, dict):
+        problems.append(f"{where} must be a mapping of name -> [x,y,w,h]")
+        return
+    for name, frac in regions.items():
+        if (
+            not isinstance(frac, (list, tuple)) or len(frac) != 4
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                       for v in frac)
+        ):
+            problems.append(f"{where}.{name} must be [x, y, w, h] numbers")
+            continue
+        x, y, w, h = (float(v) for v in frac)
+        if not (0.0 <= x < 1.0 and 0.0 <= y < 1.0 and 0.0 < w <= 1.0
+                and 0.0 < h <= 1.0 and x + w <= 1.0001 and y + h <= 1.0001):
+            problems.append(f"{where}.{name} out of range (fractions of the frame)")
 
 
 def _apply_override(data: dict[str, Any], expr: str, warnings: list[str]) -> None:
