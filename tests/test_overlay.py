@@ -27,6 +27,37 @@ def test_build_lines_confidence_none_shows_na() -> None:
     assert any("n/a" in line for line in lines)
 
 
+def test_build_lines_includes_hud_row() -> None:
+    status = AgentStatus(hud_health=0.92, hud_stamina=0.5, hud_minimap=True,
+                         ocr_engine="tesseract")
+    text = "\n".join(build_lines(status))
+    assert "HP 92%" in text
+    assert "ST 50%" in text
+    assert "map Y" in text
+    assert "ocr=tesseract" in text
+
+
+def test_build_lines_unknown_gauges_show_dashes() -> None:
+    text = "\n".join(build_lines(AgentStatus()))
+    assert "HP --" in text
+    assert "map -" in text
+
+
+def test_build_lines_prompt_line() -> None:
+    status = AgentStatus(hud_prompt_visible=True, hud_prompt="PRESS E TO MOUNT")
+    text = "\n".join(build_lines(status))
+    assert "PROMPT : PRESS E TO MOUNT" in text
+
+
+def test_draw_overlay_draws_hud_boxes() -> None:
+    frame = _frame()
+    status = AgentStatus(state="RUNNING", hud_boxes=[[100, 200, 50, 40]],
+                         hud_labels=["HP 75%"])
+    out = draw_overlay(frame, status)
+    assert out.shape == frame.shape
+    assert out.sum() != frame.sum()
+
+
 def test_state_colors_are_distinct() -> None:
     colors = {s: state_color(s) for s in ("RUNNING", "PAUSED", "STOPPED", "ERROR")}
     assert len(set(colors.values())) == len(colors)

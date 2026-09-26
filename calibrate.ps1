@@ -3,11 +3,14 @@
 #   .\calibrate.ps1 -Seconds 10
 #   .\calibrate.ps1 -Backend mss
 #   .\calibrate.ps1 -Inspect        - save sample frames instead
+#   .\calibrate.ps1 -Hud            - HUD region detection preview
 
 param(
     [string]$Backend = "",
     [double]$Seconds = 5,
     [switch]$Inspect,
+    [switch]$Hud,
+    [int]$Frames = 3,
     [switch]$Full
 )
 
@@ -21,8 +24,12 @@ if (-not (Test-Path $venvPython)) {
     exit 1
 }
 
-if ($Inspect) {
-    $argsList = @("tools\inspect_frames.py", "--frames", "5")
+if ($Hud) {
+    $argsList = @("tools\calibrate_hud.py", "--frames", "$Frames")
+    if ($Backend -ne "") { $argsList += @("--backend", $Backend) }
+    if ($Full) { $argsList += "--full" }
+} elseif ($Inspect) {
+    $argsList = @("tools\inspect_frames.py", "--frames", "$Frames")
     if ($Backend -ne "") { $argsList += @("--backend", $Backend) }
     if ($Full) { $argsList += "--full" }
 } else {

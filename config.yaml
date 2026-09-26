@@ -3,7 +3,7 @@
 
 agent:
   name: rdr2-ai
-  phase: 1
+  phase: 2
   loop_hz: 10.0          # main decision-loop rate
 
 window:
@@ -60,12 +60,37 @@ vision:
     width: 160               # small grayscale work image for cheap motion/brightness stats
     height: 90
     every_n_frames: 1
+  hud:
+    enabled: true
+    # Regions are fractions of the frame [x, y, w, h] on a 1920x1080 reference.
+    # Calibrate against the real game: .\calibrate.ps1 -Hud
+    regions:
+      health:   [0.185, 0.905, 0.055, 0.085]   # health core (bottom-left area)
+      stamina:  [0.245, 0.905, 0.055, 0.085]   # stamina core
+      dead_eye: [0.305, 0.905, 0.055, 0.085]   # dead-eye core
+      minimap:  [0.004, 0.810, 0.100, 0.185]   # minimap (bottom-left corner)
+      prompt:   [0.350, 0.720, 0.300, 0.120]   # interaction prompt (center-low)
+      wanted:   [0.870, 0.030, 0.110, 0.080]   # wanted stars (top-right)
+    gauge_contrast_min: 22.0   # min ring-vs-background contrast to trust a core reading
+    gauge_min_confidence: 0.35 # below this a core is reported as unknown, not guessed
+    minimap_hist_threshold: 0.35
+    prompt_min_edge_density: 0.035
+    prompt_min_bright_frac: 0.01
+    wanted_min_blob_px: 12
+    wanted_max_blob_px: 900
+  ocr:
+    enabled: true
+    engine: auto            # auto | tesseract | off  (auto = use tesseract if installed)
+    every_n_frames: 5       # OCR only when a prompt is visible, at 1/N of loop rate
+    languages: eng
+    min_confidence: 40      # discard OCR results below this confidence (0-100)
 
 debug:
   gui: true
   window_name: "RDR2 AI - Debug"
   render_fps: 20
   show_overlay: true
+  show_hud: true            # draw detected HUD region boxes on the overlay
   panel_width: 360
 
 recording:

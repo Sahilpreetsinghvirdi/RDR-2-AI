@@ -9,8 +9,9 @@ code into the game, or interact with Red Dead Online.
 > All input is sent through the standard Windows input pipeline (SendInput), so
 > the game sees ordinary keystrokes and mouse movement.
 
-## What it does (Phase 1)
+## What it does
 
+### Phase 1 - foundation
 - Detects the RDR2 window by title and captures only its client area.
 - Captures frames at 30 fps via `dxcam` (DXGI Desktop Duplication) with an
   automatic fallback to `mss`, plus a `synthetic` backend for development
@@ -29,6 +30,28 @@ code into the game, or interact with Red Dead Online.
   `logs/events.jsonl` (metrics, state transitions, shutdown summary), and a
   debug dashboard window showing the captured frame, overlay, and live status.
 - Optionally records frames and state to `recordings/` for dataset building.
+
+### Phase 2 - perception (HUD reading)
+- Region-based HUD detectors (`vision.hud.regions`, fraction-of-frame boxes):
+  - **Core gauges** (health / stamina / dead-eye): polar ring-fill read with
+    contrast-based confidence. Below the confidence threshold the value stays
+    *unknown* instead of guessed, and fully depleted cores read as unknown
+    (their track is indistinguishable from "hidden").
+  - **Minimap**: presence via colour-histogram distance to its surroundings.
+  - **Interaction prompts**: near-white text with enough edge density.
+  - **Wanted stars**: bright-blob counting (feeds `ThreatState.wanted_level`).
+- Optional **OCR** for prompt/objective text via Tesseract
+  (`vision.ocr.engine: auto`). If Tesseract is not installed the agent runs
+  exactly the same, just without text - nothing fails.
+- Detections project onto the shared `GameState` (player health/stamina/
+  dead-eye, threat, mission prompt) with per-field confidence; untouched
+  fields stay `None`.
+- The debug dashboard shows a `HUD : HP .. ST .. DE .. map .. ocr=..` row,
+  an optional `PROMPT :` line, and yellow boxes around detected regions.
+- `logs/events.jsonl` metrics now include a `hud` block; prompt text changes
+  are emitted as `prompt` events.
+- `.\calibrate.ps1 -Hud` runs the detectors on live frames and saves
+  annotated previews so regions can be tuned to your screen layout.
 
 ## Architecture
 
@@ -54,6 +77,9 @@ src/
     game_state.py      GameState / AgentStatus data models
   vision/
     fast_pass.py       cheap grayscale downscale stats (motion/brightness)
+    hud.py             region detectors: gauges, minimap, prompts, stars
+    ocr.py             pluggable OCR (tesseract) with graceful fallback
+    perception.py      per-frame orchestration -> GameState
   telemetry/
     logger.py          console + rotating file logs, event log
     recorder.py        frame/state recording with fps rate limiting
@@ -64,13 +90,15 @@ src/
   planning/ control/ ai/ ai/rl/ mission/   reserved for later phases
 tools/
   calibrate_capture.py measure capture fps/latency
+  calibrate_hud.py     live HUD detection preview for region tuning
   inspect_frames.py    save sample frames for verification
   input_check.py       test keyboard/mouse injection
-tests/                 123 tests (pytest)
+tests/                 165 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
-fast-pass vision, planner stub, input controller) -> telemetry/overlay`.
+fast-pass vision, HUD perception + OCR, planner stub, input controller) ->
+telemetry/overlay`.
 Safety paths (`emergency_stop`, `watchdog`, `input guards`) sit alongside and
 can cut input at any moment regardless of loop state.
 
@@ -107,10 +135,17 @@ Verify what the capture layer sees before running the agent:
 .\calibrate.ps1 -Seconds 10 -Backend mss
 .\calibrate.ps1 -Inspect             # save 5 sample frames to recordings/
 .\calibrate.ps1 -Inspect -Full       # whole screen instead of window ROI
+.\calibrate.ps1 -Hud                 # HUD detection preview (recordings/hud/)
+.\calibrate.ps1 -Hud -Frames 5
 ```
 
 Sample frames should show correct colors (not red/blue swapped). If colors are
 wrong, set `capture.color_order` explicitly to `bgr`, `rgb`, or `bgra`.
+
+The HUD preview prints every detector's pixel box and reading and saves
+annotated images. Run it with Story Mode visible, then adjust
+`vision.hud.regions` in `config.yaml` until the yellow boxes hug the actual
+HUD elements (leave a small margin around each core).
 
 ## Running
 
@@ -168,8 +203,8 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | `capture`   | backend, `target_fps`, `color_order`, `roi_mode`, synthetic size |
 | `input`     | `keyboard_mode` (scancode/virtual_key), hold/verify timing, clamps |
 | `safety`    | F12/F11/F10 bindings, watchdog stalls, startup grace, release rules |
-| `vision`    | fast-pass work image size and cadence |
-| `debug`     | dashboard window name, render fps, overlay, panel width |
+| `vision`    | `fast` pass, `hud` regions/thresholds, `ocr` engine/throttling |
+| `debug`     | dashboard window, `show_overlay`, `show_hud` boxes, panel width |
 | `recording` | fps, format, max frames, state jsonl |
 | `telemetry` | console/file logs, `events.jsonl`, metrics interval, log level |
 
@@ -197,8 +232,10 @@ synthetic backend ~24 fps, ~3 ms latency.
 
 1. **Phase 1 (done)** - window detection, capture backends, input controller,
    state machine, emergency stop, watchdog, telemetry, debug dashboard.
-2. **Phase 2** - HUD/OCR reading, richer debug overlay, perception pipeline.
-3. **Phase 3** - world state estimation (player, horse, weapons, minimap).
+2. **Phase 2 (done)** - HUD/OCR perception: core gauges, minimap, prompts,
+   wanted stars, pluggable OCR, richer overlay and telemetry.
+3. **Phase 3** - world state estimation (player, horse, weapons, minimap
+   navigation hints).
 4. **Phase 4** - navigation and locomotion control (mouse look, movement).
 5. **Phase 5** - mission/task framework and goal management.
 6. **Phase 6** - dialogue, encounters, and camp interactions.
@@ -217,6 +254,9 @@ hotkeys are never bypassed by later phases.
 | `capture backend selected: mss` + slow fps | dxcam unavailable; reinstall `dxcam`, run as the same user as the desktop session. |
 | Frames are 0, log says `waiting_for_window` | RDR2 Story Mode is not running, or the title does not match `window.title_patterns`. Check `.\calibrate.ps1 -Inspect`. |
 | Colors look swapped in saved frames | Set `capture.color_order` explicitly (`bgr`/`rgb`); dxcam delivers RGB, mss delivers BGRA. |
+| Cores always show `--` on the HUD row | Run `.\calibrate.ps1 -Hud`: either the HUD is hidden/the window is missing, or the boxes do not frame the cores - tighten `vision.hud.regions`. Regions dominated by bright scenery read *unknown* on purpose rather than a wrong value. |
+| No prompt text (`ocr=off` in the HUD row) | Tesseract is not installed. `winget install Mannuel.Tesseract-OCR`, reopen the shell; the engine switches to `tesseract` automatically (`vision.ocr.engine: auto`). |
+| Prompt line never appears | Raise `vision.hud.prompt_min_edge_density`/`prompt_min_bright_frac` down, check the `prompt` region with `.\calibrate.ps1 -Hud`. |
 | Input has no effect in game | Click the game window first; input is refused unless the game is focused. Try `input.keyboard_mode: virtual_key` if scancodes are ignored. |
 | `hotkeys not armed` / F12 ignored | The agent process must be running; check `logs/rdr2ai_*.log` for the `hotkeys armed` line. |
 | Watchdog faults at startup | Lower `agent.loop_hz` or raise `safety.heartbeat_stall_s`; check `logs/events.jsonl` for the stalled component. |
@@ -227,7 +267,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 123 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 165 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 ```
 

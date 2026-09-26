@@ -1,6 +1,6 @@
-"""RDR2 AI - Phase 1 agent entry point.
+"""RDR2 AI - Phase 2 agent entry point.
 
-Closed loop: capture -> fast vision -> status -> (Phase 1: verification only)
+Closed loop: capture -> fast vision + HUD perception (OCR when available)
 -> guarded input -> observe. Emergency stop F12, pause F11, human takeover F10.
 """
 
@@ -29,10 +29,12 @@ from src.safety.emergency_stop import EmergencyStop
 from src.safety.state_machine import AgentState, StateMachine
 from src.safety.watchdog import HeartbeatRegistry, Watchdog
 from src.state.agent_status import StatusTracker
+from src.state.game_state import GameState
 from src.telemetry.logger import EventLog, setup_logging
 from src.telemetry.recorder import SessionRecorder
 from src.ui.dashboard import Dashboard
 from src.vision.fast_pass import FastPass
+from src.vision.perception import Perception, PerceptionResult, hud_summary
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ log = logging.getLogger(__name__)
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="rdr2-ai",
-        description="Autonomous AI player foundation for RDR2 Story Mode (Phase 1).",
+        description="Autonomous AI player foundation for RDR2 Story Mode (Phase 2).",
     )
     parser.add_argument("--config", default=None, help="path to config.yaml")
     parser.add_argument(
@@ -122,6 +124,12 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         recorder = SessionRecorder(cfg.recording, cfg.resolve(cfg.recording.dir))
     dashboard = Dashboard(cfg.debug)
     fast = FastPass(cfg.vision.fast)
+    perception = Perception(cfg.vision)
+    game_state = GameState()
+    if not cfg.vision.hud.enabled:
+        log.info("hud perception disabled (vision.hud.enabled=false)")
+    if perception.ocr_engine == "off":
+        log.info("ocr disabled - prompt/objective text will not be read")
     demo: Phase1Demo | None = None
     if args.demo:
         demo = Phase1Demo(
@@ -164,8 +172,8 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             cfg.debug.gui, bool(args.demo),
         )
         rc = _agent_loop(
-            cfg, args, machine, heartbeats, wm, capture, fast, status,
-            input_ctrl, recorder, events, demo, started,
+            cfg, args, machine, heartbeats, wm, capture, fast, perception,
+            game_state, status, input_ctrl, recorder, events, demo, started,
         )
     except KeyboardInterrupt:
         log.warning("interrupted by user (Ctrl+C)")
@@ -247,6 +255,8 @@ def _agent_loop(
     wm: GameWindowManager,
     capture: ScreenCapture,
     fast: FastPass,
+    perception: Perception,
+    game_state: GameState,
     status: StatusTracker,
     input_ctrl: InputController,
     recorder: SessionRecorder | None,
@@ -257,6 +267,7 @@ def _agent_loop(
     period = 1.0 / max(1.0, cfg.agent.loop_hz)
     hz = 0.0
     window_seen = False
+    last_pres: PerceptionResult | None = None
     next_metrics = time.monotonic() + cfg.telemetry.metrics_interval_s
     deadline = started + args.duration if args.duration > 0 else None
 
@@ -298,9 +309,9 @@ def _agent_loop(
             )
 
         if state is AgentState.RUNNING:
-            _run_active_work(
-                cfg, capture, fast, packet, info, status, input_ctrl,
-                recorder, demo, events,
+            last_pres = _run_active_work(
+                cfg, capture, fast, perception, game_state, packet, info, status,
+                input_ctrl, recorder, demo, events,
             )
         else:
             status.update(
@@ -341,6 +352,7 @@ def _agent_loop(
                 capture=capture.stats.to_dict(),
                 input=input_ctrl.snapshot(),
                 window="found" if info is not None else "missing",
+                hud=hud_summary(last_pres) if last_pres is not None else None,
             )
             log.debug(
                 "metrics: %.1f Hz, capture %.1f fps (%.1f ms), vision %.1f ms, input %s",
@@ -357,6 +369,8 @@ def _run_active_work(
     cfg: AppConfig,
     capture: ScreenCapture,
     fast: FastPass,
+    perception: Perception,
+    game_state: GameState,
     packet: FramePacket | None,
     info: WindowInfo | None,
     status: StatusTracker,
@@ -364,10 +378,10 @@ def _run_active_work(
     recorder: SessionRecorder | None,
     demo: Phase1Demo | None,
     events: EventLog,
-) -> None:
+) -> PerceptionResult | None:
     if info is None:
         status.update(action="none", message="waiting for RDR2 window")
-        return
+        return None
     if packet is None:
         status.update(
             action="none",
@@ -375,16 +389,24 @@ def _run_active_work(
             frame_age_ms=0.0,
             message=f"waiting for frames ({capture.stats.backend})",
         )
-        return
+        return None
     if packet.age_ms > cfg.capture.max_frame_age_ms:
         status.update(
             action="none", frame_age_ms=round(packet.age_ms, 1),
             message=f"stale frame ({packet.age_ms:.0f}ms > "
                     f"{cfg.capture.max_frame_age_ms}ms)",
         )
-        return
+        return None
 
     result = fast.process(packet.image)
+    pres = perception.process(packet.image, packet.frame_id)
+    perception.apply_to_state(game_state, pres)
+    boxes, labels = (
+        perception.overlay_boxes(pres) if cfg.debug.show_hud else ([], [])
+    )
+    gauges = pres.hud.gauges
+    prompt_visible = bool(pres.hud.prompt is not None and pres.hud.prompt.present)
+    minimap = pres.hud.minimap
     status.update(
         frame_id=packet.frame_id,
         frame_age_ms=round(packet.age_ms, 1),
@@ -392,17 +414,36 @@ def _run_active_work(
         vision_ms=round(result.latency_ms, 2),
         brightness=round(result.brightness, 1),
         motion=round(result.motion, 2),
-        goal="IDLE (phase 1)" if demo is None or not demo.active else "VERIFY_INPUT",
-        message="observing" if demo is None or not demo.active else status.snapshot().message,
+        hud_health=gauges["health"].value if "health" in gauges else None,
+        hud_stamina=gauges["stamina"].value if "stamina" in gauges else None,
+        hud_dead_eye=gauges["dead_eye"].value if "dead_eye" in gauges else None,
+        hud_minimap=minimap.present if minimap is not None else None,
+        hud_prompt_visible=prompt_visible,
+        hud_prompt=perception.last_prompt,
+        hud_boxes=boxes,
+        hud_labels=labels,
+        hud_ms=round(pres.latency_ms, 2),
+        ocr_engine=pres.ocr_engine,
+        goal=(
+            f"IDLE (phase {cfg.agent.phase})"
+            if demo is None or not demo.active else "VERIFY_INPUT"
+        ),
+        message="observing" if demo is None or not demo.active
+        else status.snapshot().message,
     )
+
+    if pres.prompt_changed and pres.prompt_text:
+        log.info("prompt: %s", pres.prompt_text)
+        events.emit("prompt", text=pres.prompt_text)
 
     if demo is not None and demo.active:
         demo.step(status)
     elif demo is not None:
-        status.update(goal="IDLE (phase 1)", action="none")
+        status.update(goal=f"IDLE (phase {cfg.agent.phase})", action="none")
 
     if recorder is not None:
         recorder.record(packet, status.to_dict())
+    return pres
 
 
 def main(argv: list[str] | None = None) -> int:

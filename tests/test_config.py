@@ -101,3 +101,39 @@ def test_bad_root_type_raises(tmp_path: Path) -> None:
 
 def test_app_config_defaults_are_valid() -> None:
     AppConfig().validate()
+
+
+def test_vision_hud_config_present(app_config) -> None:
+    hud = app_config.vision.hud
+    assert hud.enabled is True
+    expected = {"health", "stamina", "dead_eye", "minimap", "prompt", "wanted"}
+    assert expected <= set(hud.regions)
+    for frac in hud.regions.values():
+        assert len(frac) == 4
+
+
+def test_invalid_hud_region_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "c.yaml"
+    bad = {"vision": {"hud": {"regions": {"health": [0.1, 0.2, 0.3]}}}}
+    path.write_text(yaml.safe_dump(bad))
+    with pytest.raises(ConfigError):
+        load_config(path)
+
+
+def test_hud_region_out_of_frame_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "c.yaml"
+    bad = {"vision": {"hud": {"regions": {"health": [0.9, 0.9, 0.5, 0.5]}}}}
+    path.write_text(yaml.safe_dump(bad))
+    with pytest.raises(ConfigError):
+        load_config(path)
+
+
+def test_invalid_ocr_engine_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "c.yaml"
+    path.write_text(yaml.safe_dump({"vision": {"ocr": {"engine": "magic"}}}))
+    with pytest.raises(ConfigError):
+        load_config(path)
+
+
+def test_debug_show_hud_defaults() -> None:
+    assert AppConfig().debug.show_hud is True

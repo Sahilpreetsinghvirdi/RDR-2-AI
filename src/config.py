@@ -99,9 +99,47 @@ class FastPassConfig:
     every_n_frames: int = 1
 
 
+DEFAULT_HUD_REGIONS: dict[str, list[float]] = {
+    # x, y, w, h as fractions of the frame (reference layout 1920x1080).
+    # Tune against the real game with tools/calibrate_hud.py.
+    "health": [0.185, 0.905, 0.055, 0.085],
+    "stamina": [0.245, 0.905, 0.055, 0.085],
+    "dead_eye": [0.305, 0.905, 0.055, 0.085],
+    "minimap": [0.004, 0.810, 0.100, 0.185],
+    "prompt": [0.350, 0.720, 0.300, 0.120],
+    "wanted": [0.870, 0.030, 0.110, 0.080],
+}
+
+
+@dataclass
+class HudConfig:
+    enabled: bool = True
+    regions: dict[str, list[float]] = field(
+        default_factory=lambda: copy.deepcopy(DEFAULT_HUD_REGIONS)
+    )
+    gauge_contrast_min: float = 22.0
+    gauge_min_confidence: float = 0.35
+    minimap_hist_threshold: float = 0.35
+    prompt_min_edge_density: float = 0.035
+    prompt_min_bright_frac: float = 0.01
+    wanted_min_blob_px: int = 12
+    wanted_max_blob_px: int = 900
+
+
+@dataclass
+class OcrConfig:
+    enabled: bool = True
+    engine: str = "auto"          # auto | tesseract | off
+    every_n_frames: int = 5
+    languages: str = "eng"
+    min_confidence: float = 40.0  # 0..100, engine confidence scale
+
+
 @dataclass
 class VisionConfig:
     fast: FastPassConfig = field(default_factory=FastPassConfig)
+    hud: HudConfig = field(default_factory=HudConfig)
+    ocr: OcrConfig = field(default_factory=OcrConfig)
 
 
 @dataclass
@@ -110,6 +148,7 @@ class DebugConfig:
     window_name: str = "RDR2 AI - Debug"
     render_fps: int = 20
     show_overlay: bool = True
+    show_hud: bool = True
     panel_width: int = 360
 
 
@@ -208,6 +247,34 @@ class AppConfig:
             )
         if not isinstance(self.window.title_patterns, list) or not self.window.title_patterns:
             problems.append("window.title_patterns must be a non-empty list")
+        if self.vision.ocr.engine not in {"auto", "tesseract", "off"}:
+            problems.append(
+                f"vision.ocr.engine must be auto|tesseract|off, got {self.vision.ocr.engine!r}"
+            )
+        _positive("vision.ocr.every_n_frames", self.vision.ocr.every_n_frames, (int,))
+        if not 0 <= self.vision.ocr.min_confidence <= 100:
+            problems.append("vision.ocr.min_confidence must be within 0..100")
+        if not isinstance(self.vision.hud.regions, dict):
+            problems.append("vision.hud.regions must be a mapping of name -> [x,y,w,h]")
+        else:
+            for name, frac in self.vision.hud.regions.items():
+                if (
+                    not isinstance(frac, (list, tuple)) or len(frac) != 4
+                    or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                               for v in frac)
+                ):
+                    problems.append(
+                        f"vision.hud.regions.{name} must be [x, y, w, h] numbers"
+                    )
+                    continue
+                x, y, w, h = (float(v) for v in frac)
+                if not (0.0 <= x < 1.0 and 0.0 <= y < 1.0 and 0.0 < w <= 1.0
+                        and 0.0 < h <= 1.0 and x + w <= 1.0001 and y + h <= 1.0001):
+                    problems.append(
+                        f"vision.hud.regions.{name} out of range (fractions of the frame)"
+                    )
+        if not 0.0 <= self.vision.hud.gauge_min_confidence <= 1.0:
+            problems.append("vision.hud.gauge_min_confidence must be within 0..1")
         if not isinstance(self.agent.phase, int) or self.agent.phase < 1:
             problems.append(f"agent.phase must be an int >= 1, got {self.agent.phase!r}")
         if not isinstance(self.telemetry.log_level, str):

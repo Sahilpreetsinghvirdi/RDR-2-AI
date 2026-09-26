@@ -33,6 +33,16 @@ class AgentStatus:
     last_action: str = ""
     demo_step: str = ""
     error: str = ""
+    hud_health: float | None = None
+    hud_stamina: float | None = None
+    hud_dead_eye: float | None = None
+    hud_minimap: bool | None = None
+    hud_prompt_visible: bool = False
+    hud_prompt: str = ""
+    hud_boxes: list[list[int]] = field(default_factory=list)
+    hud_labels: list[str] = field(default_factory=list)
+    hud_ms: float = 0.0
+    ocr_engine: str = "off"
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

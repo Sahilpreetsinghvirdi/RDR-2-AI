@@ -21,6 +21,12 @@ def state_color(state: str) -> tuple[int, int, int]:
     return STATE_COLORS_BGR.get(state, (200, 200, 200))
 
 
+def _pct(value: float | None) -> str:
+    if value is None:
+        return "--"
+    return f"{value * 100:.0f}%"
+
+
 def build_lines(status: AgentStatus) -> list[str]:
     """Human-readable status lines shared by overlay and side panel."""
     bounds = status.window_bounds
@@ -30,6 +36,7 @@ def build_lines(status: AgentStatus) -> list[str]:
     size = f"{status.frame_size[0]}x{status.frame_size[1]}" if status.frame_size else "-"
     held = ", ".join(status.held_keys + status.held_buttons) or "none"
     conf = f"{status.confidence * 100:.0f}%" if status.confidence is not None else "n/a"
+    minimap = "-" if status.hud_minimap is None else ("Y" if status.hud_minimap else "N")
     lines = [
         "RDR2 AI  PHASE " + str(status.phase),
         "STATUS : " + status.state,
@@ -41,11 +48,19 @@ def build_lines(status: AgentStatus) -> list[str]:
         f"FRAME  : #{status.frame_id} age {status.frame_age_ms:.0f}ms  {size}",
         f"VISION : {status.vision_ms:.1f}ms  bright {status.brightness:.0f}  "
         f"motion {status.motion:.1f}",
+        f"HUD    : HP {_pct(status.hud_health)} ST {_pct(status.hud_stamina)} "
+        f"DE {_pct(status.hud_dead_eye)}  map {minimap}  "
+        f"{status.hud_ms:.1f}ms  ocr={status.ocr_engine}",
         f"LOOP   : {status.loop_hz:.1f} Hz   input lat {status.input_latency_ms:.1f}ms",
         "HELD   : " + held,
         f"GOAL   : {status.goal}   ACTION: {status.action}",
         "CONF   : " + conf,
     ]
+    if status.hud_prompt_visible or status.hud_prompt:
+        prompt = status.hud_prompt or "(visible, reading...)"
+        if len(prompt) > 62:
+            prompt = prompt[:59] + "..."
+        lines.append("PROMPT : " + prompt)
     if status.demo_step:
         lines.append("DEMO   : " + status.demo_step)
     if status.message:
@@ -98,4 +113,21 @@ def draw_overlay(
             cv2.FONT_HERSHEY_SIMPLEX, scale, line_color, 1, cv2.LINE_AA,
         )
         y += line_gap
+
+    hud_color = (0, 255, 255)
+    for box, label in zip(status.hud_boxes, status.hud_labels, strict=False):
+        if len(box) != 4:
+            continue
+        bx, by, bw, bh = (int(v) for v in box)
+        cv2.rectangle(canvas, (bx, by), (bx + bw, by + bh), hud_color, 2)
+        if label:
+            ty = max(14, by - 6)
+            cv2.putText(
+                canvas, label, (bx, ty),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2, cv2.LINE_AA,
+            )
+            cv2.putText(
+                canvas, label, (bx, ty),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, hud_color, 1, cv2.LINE_AA,
+            )
     return canvas
