@@ -317,6 +317,9 @@ This creates `.venv`, installs runtime + dev dependencies
    input target (see `config.yaml`).
 4. Start the agent and press F10 (human takeover) if you want to play
    yourself while it runs.
+5. Full PC keyboard/mouse command reference (all default game bindings,
+   collected by the project owner): [`docs/CONTROLS.md`](docs/CONTROLS.md).
+   It also maps every key the agent sends to the matching in-game command.
 
 ## Calibration
 
