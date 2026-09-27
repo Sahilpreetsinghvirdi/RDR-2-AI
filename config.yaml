@@ -3,7 +3,7 @@
 
 agent:
   name: rdr2-ai
-  phase: 6
+  phase: 7
   loop_hz: 10.0          # main decision-loop rate
 
 window:
@@ -98,6 +98,24 @@ mission:
     - interact: {}             # taps control.keys.interact (E)
     - log: {text: "mission complete"}
 
+combat:
+  enabled: false               # self-defense: aim + fire (off = observe only)
+  engage_min_wanted: 1         # wanted stars required to engage
+  engage_enemies: 1            # minimap red blips required to engage
+  engage_on_incoming_fire: true
+  health_drop_window_s: 1.5    # rolling window for damage detection
+  health_drop_frac: 0.05       # health drop within window = taking fire
+  incoming_fire_hold_s: 2.0    # incoming_fire stays set this long after a drop
+  aim_interval_s: 0.25         # how often aim is corrected
+  aim_dead_zone_deg: 4.0       # ignore aim error below this
+  aim_max_step_deg: 15.0       # aim correction per attempt
+  fire_button: left
+  burst_s: 0.35                # hold the fire button this long
+  burst_interval_s: 1.0        # minimum gap between bursts
+  retreat_health_frac: 0.25    # at/below this health: back off instead of firing
+  retreat_step_s: 0.5          # backward burst length while retreating
+  disengage_clear_s: 1.5       # threat clear this long before standing down
+
 vision:
   fast:
     enabled: true
@@ -149,6 +167,11 @@ vision:
     sky_max_std: 35.0         # sky uniformity for clear vs cloudy
     ammo_min_bright_frac: 0.004
     ammo_min_luma: 170.0
+    enemy_red_min: 150         # minimap enemy blips are solid red
+    enemy_red_chroma: 60       # red must exceed green/blue by this much
+    enemy_min_blob_px: 3
+    enemy_max_blob_px: 160
+    enemy_max_dots: 10         # cap on counted red blips
   dialogue:
     enabled: true              # subtitle presence + encounter keyword matching
     region: [0.20, 0.82, 0.60, 0.07]  # subtitle band (fractions of the frame)

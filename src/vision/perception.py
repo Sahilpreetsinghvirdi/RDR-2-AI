@@ -214,6 +214,10 @@ class Perception:
             env.wilderness = minimap.green_frac >= wc.green_min_frac
             boost = 0.7 if minimap.marker_present else 0.4
             state.confidence.navigation = max(state.confidence.navigation, boost)
+            state.threat.enemies_detected = minimap.enemy_dots
+            state.threat.enemy_offset = (
+                minimap.enemy_offset if minimap.enemy_dots else None
+            )
 
         sky = world.sky
         if sky is not None and sky.present and sky.time_of_day:
@@ -265,6 +269,7 @@ def world_summary(result: PerceptionResult) -> dict[str, object]:
         "road": (minimap.road_frac if minimap else 0.0),
         "water": (minimap.water_frac if minimap else 0.0),
         "marker": bool(minimap and minimap.marker_present),
+        "enemies": (minimap.enemy_dots if minimap else None),
         "ammo": result.ammo,
         "horse_detected": bool(horse and horse.detected),
         "latency_ms": round(world.latency_ms, 2),
@@ -283,6 +288,17 @@ def dialogue_summary(result: PerceptionResult) -> dict[str, object]:
         "encounter": result.encounter or "",
         "confidence": round(dialogue.confidence, 3),
         "latency_ms": round(dialogue.latency_ms, 2),
+    }
+
+
+def threat_summary(state: GameState) -> dict[str, object]:
+    """Compact threat snapshot for telemetry events."""
+    threat = state.threat
+    return {
+        "level": threat.level,
+        "enemies": threat.enemies_detected,
+        "wanted": threat.wanted_level,
+        "incoming_fire": threat.incoming_fire,
     }
 
 

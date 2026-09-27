@@ -52,6 +52,10 @@ class AgentStatus:
     dialogue_text: str = ""
     dialogue_encounter: str = ""
     dialogue_ms: float = 0.0
+    threat_level: str = "none"
+    threat_enemies: int | None = None
+    threat_wanted: int = 0
+    threat_fire: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

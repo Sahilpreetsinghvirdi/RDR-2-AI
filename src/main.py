@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable
 
 from src import __version__
+from src.ai.threat import ThreatAssessor
 from src.capture.screen_capture import FramePacket, ScreenCapture
 from src.capture.window_manager import (
     GameWindowManager,
@@ -28,6 +29,7 @@ from src.demo import Phase1Demo
 from src.input.input_controller import InputController
 from src.mission.respond import PromptResponder
 from src.mission.runner import MissionRunner
+from src.planning.combat import CombatPlanner
 from src.planning.route import RoutePlanner
 from src.planning.scripted import ScriptedPlanner
 from src.safety.emergency_stop import EmergencyStop
@@ -44,6 +46,7 @@ from src.vision.perception import (
     PerceptionResult,
     dialogue_summary,
     hud_summary,
+    threat_summary,
     world_summary,
 )
 
@@ -155,6 +158,12 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             ", ".join(f"{k}->{v}" for k, v in cfg.vision.dialogue.respond_to.items()),
         )
 
+    assessor = ThreatAssessor(cfg.combat)
+    combat: CombatPlanner | None = None
+    if cfg.combat.enabled:
+        combat = CombatPlanner(cfg.combat, locomotion, input_ctrl)
+        log.info("combat enabled - self-defense armed (engage on wanted/enemies/fire)")
+
     events_path = cfg.resolve(cfg.telemetry.dir) / cfg.telemetry.events_file
     events = EventLog(events_path if cfg.telemetry.file else None)
 
@@ -228,7 +237,7 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         rc = _agent_loop(
             cfg, args, machine, heartbeats, wm, capture, fast, perception,
             game_state, status, input_ctrl, recorder, events, demo, started,
-            locomotion, planner, responder,
+            locomotion, planner, responder, assessor, combat,
         )
     except KeyboardInterrupt:
         log.warning("interrupted by user (Ctrl+C)")
@@ -321,6 +330,8 @@ def _agent_loop(
     locomotion: LocomotionController,
     planner: ScriptedPlanner | RoutePlanner | MissionRunner | None,
     responder: PromptResponder | None = None,
+    assessor: ThreatAssessor | None = None,
+    combat: CombatPlanner | None = None,
 ) -> int:
     period = 1.0 / max(1.0, cfg.agent.loop_hz)
     hz = 0.0
@@ -370,9 +381,12 @@ def _agent_loop(
             last_pres = _run_active_work(
                 cfg, capture, fast, perception, game_state, packet, info, status,
                 input_ctrl, recorder, demo, events, locomotion, planner, responder,
+                assessor, combat,
             )
         else:
             locomotion.stop()
+            if combat is not None:
+                combat.stop()
             status.update(
                 state=state.value,
                 action="none",
@@ -414,6 +428,7 @@ def _agent_loop(
                 hud=hud_summary(last_pres) if last_pres is not None else None,
                 world=world_summary(last_pres) if last_pres is not None else None,
                 dialogue=dialogue_summary(last_pres) if last_pres is not None else None,
+                threat=threat_summary(game_state),
             )
             log.debug(
                 "metrics: %.1f Hz, capture %.1f fps (%.1f ms), vision %.1f ms, input %s",
@@ -442,13 +457,19 @@ def _run_active_work(
     locomotion: LocomotionController,
     planner: ScriptedPlanner | RoutePlanner | MissionRunner | None,
     responder: PromptResponder | None = None,
+    assessor: ThreatAssessor | None = None,
+    combat: CombatPlanner | None = None,
 ) -> PerceptionResult | None:
     if info is None:
         locomotion.stop()
+        if combat is not None:
+            combat.stop()
         status.update(action="none", message="waiting for RDR2 window")
         return None
     if packet is None:
         locomotion.stop()
+        if combat is not None:
+            combat.stop()
         status.update(
             action="none",
             frame_id=0,
@@ -458,6 +479,8 @@ def _run_active_work(
         return None
     if packet.age_ms > cfg.capture.max_frame_age_ms:
         locomotion.stop()
+        if combat is not None:
+            combat.stop()
         status.update(
             action="none", frame_age_ms=round(packet.age_ms, 1),
             message=f"stale frame ({packet.age_ms:.0f}ms > "
@@ -466,10 +489,14 @@ def _run_active_work(
         return None
     if not info.focused:
         locomotion.stop()
+        if combat is not None:
+            combat.stop()
 
     result = fast.process(packet.image)
     pres = perception.process(packet.image, packet.frame_id)
     perception.apply_to_state(game_state, pres)
+    if assessor is not None:
+        assessor.assess(time.monotonic(), game_state)
     boxes, labels = (
         perception.overlay_boxes(pres) if cfg.debug.show_hud else ([], [])
     )
@@ -507,6 +534,10 @@ def _run_active_work(
         dialogue_text=pres.dialogue.text or "",
         dialogue_encounter=pres.encounter or "",
         dialogue_ms=round(pres.dialogue.latency_ms, 2),
+        threat_level=game_state.threat.level,
+        threat_enemies=game_state.threat.enemies_detected,
+        threat_wanted=game_state.threat.wanted_level,
+        threat_fire=game_state.threat.incoming_fire,
         goal=(
             f"IDLE (phase {cfg.agent.phase})"
             if demo is None or not demo.active else "VERIFY_INPUT"
@@ -519,15 +550,22 @@ def _run_active_work(
         log.info("prompt: %s", pres.prompt_text)
         events.emit("prompt", text=pres.prompt_text)
 
+    engaged = False
     if demo is not None and demo.active:
         demo.step(status)
-    elif planner is not None:
-        planner.step(time.monotonic(), status, packet.image, game_state)
-    elif demo is not None:
-        status.update(goal=f"IDLE (phase {cfg.agent.phase})", action="none")
-
-    if responder is not None and (demo is None or not demo.active):
-        responder.step(time.monotonic(), status, game_state)
+    else:
+        if combat is not None:
+            combat.step(time.monotonic(), status, packet.image, game_state)
+            engaged = combat.engaged
+        if not engaged:
+            if planner is not None:
+                planner.step(time.monotonic(), status, packet.image, game_state)
+            elif demo is not None:
+                status.update(
+                    goal=f"IDLE (phase {cfg.agent.phase})", action="none"
+                )
+        if responder is not None:
+            responder.step(time.monotonic(), status, game_state)
 
     if recorder is not None:
         recorder.record(packet, status.to_dict())

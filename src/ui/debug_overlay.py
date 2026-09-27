@@ -77,6 +77,13 @@ def build_lines(status: AgentStatus) -> list[str]:
             text = text[:51] + "..."
         encounter = f"  enc={status.dialogue_encounter}" if status.dialogue_encounter else ""
         lines.append(f"DIALOG : {state} {text}{encounter}")
+    if status.threat_level != "none":
+        enemies = "?" if status.threat_enemies is None else str(status.threat_enemies)
+        fire = "fire Y" if status.threat_fire else "fire N"
+        lines.append(
+            f"THREAT : {status.threat_level}  enemies {enemies}  "
+            f"wanted {status.threat_wanted}  {fire}"
+        )
     if status.demo_step:
         lines.append("DEMO   : " + status.demo_step)
     if status.message:

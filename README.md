@@ -128,6 +128,24 @@ code into the game, or interact with Red Dead Online.
 - Arm it by filling `vision.dialogue.respond_to` (empty by default - the
   agent observes encounters without reacting until you choose mappings).
 
+### Phase 7 - combat and self-defense
+- Minimap threat detection (Phase 3 extension): red enemy blips are counted
+  in the minimap region (`vision.world.enemy_*` thresholds) and the nearest
+  one yields a direction offset on `ThreatState`.
+- New `src/ai/threat.py`: `ThreatAssessor` (stateful, input-free) watches the
+  health gauge for a drop inside `combat.health_drop_window_s` to flag
+  `incoming_fire`, and maintains the level ladder
+  `none < enemy < wanted < under_fire` from detected signals only.
+- New `src/planning/combat.py`: `CombatPlanner` engages on wanted stars,
+  minimap blips, or incoming fire; aims at the nearest blip's minimap offset
+  (clamped corrections, dead zone), fires config-clamped bursts
+  (`burst_s` / `burst_interval_s`, never with 0 ammo), retreats below
+  `retreat_health_frac`, and stands down after the threat clears for
+  `disengage_clear_s`. While engaged it replaces the navigation planner.
+- Safety unchanged: `combat.enabled: false` by default, every button event
+  still passes the focus/state guard, and pause/takeover/lost focus/window
+  loss all release the fire button. Off by default.
+
 ## Architecture
 
 ```
@@ -169,17 +187,20 @@ src/
   planning/
     scripted.py        Phase 4 scripted autopilot (look/walk cycle)
     route.py           Phase 4 route navigation (bearing/distance legs)
+    combat.py          Phase 7 self-defense planner (aim/fire/retreat)
   mission/
     tasks.py           Phase 5 task model + config parser
     runner.py          Phase 5 mission executor (MISSION n/N status)
     respond.py         Phase 6 prompt responder (encounter -> key tap)
-  ai/ ai/rl/           reserved for later phases
+  ai/
+    threat.py          Phase 7 threat assessor (damage window, level ladder)
+    rl/                reserved for later phases
 tools/
   calibrate_capture.py measure capture fps/latency
   calibrate_hud.py     live HUD detection preview for region tuning
   inspect_frames.py    save sample frames for verification
   input_check.py       test keyboard/mouse injection
-tests/                 310 tests (pytest)
+tests/                 351 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -293,7 +314,8 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | `safety`    | F12/F11/F10 bindings, watchdog stalls, startup grace, release rules |
 | `control`   | autopilot on/off, `mode` (script/route), movement keys, look sensitivity, `nav` legs/gains/stalls |
 | `mission`   | task list (`turn`/`walk`/`wait`/`wait_for`/`interact`/`log`), `loop` restart |
-| `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators, `dialogue` band/keywords/reactions, `ocr` engine/throttling |
+| `combat`    | self-defense on/off, engage thresholds, aim/fire/retreat clamps |
+| `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators + minimap enemy blips, `dialogue` band/keywords/reactions, `ocr` engine/throttling |
 | `debug`     | dashboard window, `show_overlay`/`show_hud` boxes, panel width |
 | `recording` | fps, format, max frames, state jsonl |
 | `telemetry` | console/file logs, `events.jsonl`, metrics interval, log level |
@@ -335,7 +357,9 @@ synthetic backend ~24 fps, ~3 ms latency.
 6. **Phase 6 (done)** - dialogue, encounters, and camp interactions:
    subtitle-band detection, encounter keyword matching against visible
    prompt/subtitle text, and configurable prompt reactions.
-7. **Phase 7** - combat and self-defense behaviors.
+7. **Phase 7 (done)** - combat and self-defense behaviors: minimap enemy
+   blips, damage-window threat assessment, and an engage/aim/fire/retreat
+   planner that is off by default.
 8. **Phase 8** - survival systems (food, camp, crafting, economy).
 9. **Phase 9** - learned/optimized policies (RL) on top of scripted skills.
 10. **Phase 10** - robustness, long-run autonomy, packaging and docs.
@@ -365,7 +389,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 310 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 351 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 ```
 

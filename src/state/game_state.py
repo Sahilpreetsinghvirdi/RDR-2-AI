@@ -70,7 +70,8 @@ class MissionState:
 @dataclass
 class ThreatState:
     level: str = "none"
-    enemies_detected: int = 0
+    enemies_detected: int | None = None  # None = minimap not read this frame
+    enemy_offset: list[float] | None = None  # dx, dy of nearest red blip (-0.5..0.5)
     wanted_level: int = 0
     incoming_fire: bool = False
 

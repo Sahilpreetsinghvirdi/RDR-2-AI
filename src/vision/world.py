@@ -32,6 +32,8 @@ class MinimapReading:
     marker_present: bool = False
     marker_bbox: list[int] | None = None
     marker_offset: list[float] | None = None  # dx, dy in -0.5..0.5
+    enemy_dots: int | None = None     # None = minimap too small to read
+    enemy_offset: list[float] | None = None  # nearest red blip, dx/dy in -0.5..0.5
     water_frac: float = 0.0
     road_frac: float = 0.0
     green_frac: float = 0.0
@@ -111,6 +113,7 @@ class WorldReading:
             "minimap": (
                 {
                     "marker": self.minimap.marker_present,
+                    "enemies": self.minimap.enemy_dots,
                     "water": round(self.minimap.water_frac, 3),
                     "road": round(self.minimap.road_frac, 3),
                     "green": round(self.minimap.green_frac, 3),
@@ -189,7 +192,41 @@ def _read_minimap(
         reading.confidence = 0.7
     else:
         reading.confidence = 0.4
+
+    reading.enemy_dots, reading.enemy_offset = _count_enemy_dots(crop, cfg)
     return reading
+
+
+def _count_enemy_dots(
+    crop: np.ndarray, cfg: WorldConfig
+) -> tuple[int | None, list[float] | None]:
+    """Count small red blips (enemy markers) on the minimap; nearest one gives a direction."""
+    h, w = crop.shape[:2]
+    if min(h, w) < 16:
+        return None, None
+    b = crop[:, :, 0].astype(np.int16)
+    g = crop[:, :, 1].astype(np.int16)
+    r = crop[:, :, 2].astype(np.int16)
+    red = (
+        (r >= cfg.enemy_red_min)
+        & (r >= g + cfg.enemy_red_chroma)
+        & (r >= b + cfg.enemy_red_chroma)
+    ).astype(np.uint8)
+    if int(red.sum()) == 0:
+        return 0, None
+    n_labels, _, stats, centroids = cv2.connectedComponentsWithStats(red, 8)
+    dots: list[tuple[float, float]] = []
+    for i in range(1, n_labels):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        if cfg.enemy_min_blob_px <= area <= cfg.enemy_max_blob_px:
+            dots.append((float(centroids[i][0]), float(centroids[i][1])))
+    if not dots:
+        return 0, None
+    dots = dots[: cfg.enemy_max_dots]
+    cx, cy = min(
+        dots, key=lambda p: (p[0] - w / 2.0) ** 2 + (p[1] - h / 2.0) ** 2
+    )
+    return len(dots), [round(cx / w - 0.5, 3), round(cy / h - 0.5, 3)]
 
 
 def _read_sky(crop: np.ndarray, cfg: WorldConfig) -> SkyReading:

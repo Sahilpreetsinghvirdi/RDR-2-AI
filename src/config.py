@@ -212,6 +212,11 @@ class WorldConfig:
     sky_max_std: float = 35.0
     ammo_min_bright_frac: float = 0.004
     ammo_min_luma: float = 170.0
+    enemy_red_min: int = 150          # minimap enemy blips are solid red
+    enemy_red_chroma: int = 60        # red must exceed green/blue by this much
+    enemy_min_blob_px: int = 3
+    enemy_max_blob_px: int = 160
+    enemy_max_dots: int = 10
 
 
 @dataclass
@@ -243,6 +248,28 @@ class VisionConfig:
     ocr: OcrConfig = field(default_factory=OcrConfig)
     world: WorldConfig = field(default_factory=WorldConfig)
     dialogue: DialogueConfig = field(default_factory=DialogueConfig)
+
+
+@dataclass
+class CombatConfig:
+    """Self-defense behavior (Phase 7): aim at minimap threats, fire bursts."""
+
+    enabled: bool = False            # off = agent only observes threats
+    engage_min_wanted: int = 1       # wanted stars required to engage
+    engage_enemies: int = 1          # minimap red dots required to engage
+    engage_on_incoming_fire: bool = True
+    health_drop_window_s: float = 1.5   # rolling window for damage detection
+    health_drop_frac: float = 0.05      # health drop within window = taking fire
+    incoming_fire_hold_s: float = 2.0   # incoming_fire stays set this long
+    aim_interval_s: float = 0.25        # how often aim is corrected
+    aim_dead_zone_deg: float = 4.0      # ignore aim error below this
+    aim_max_step_deg: float = 15.0      # aim correction per attempt
+    fire_button: str = "left"
+    burst_s: float = 0.35               # hold the fire button this long
+    burst_interval_s: float = 1.0       # minimum gap between bursts
+    retreat_health_frac: float = 0.25   # at/below this health: back off
+    retreat_step_s: float = 0.5         # backward burst length while retreating
+    disengage_clear_s: float = 1.5      # threat must clear this long to stand down
 
 
 @dataclass
@@ -287,6 +314,7 @@ class AppConfig:
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
     mission: MissionConfig = field(default_factory=MissionConfig)
+    combat: CombatConfig = field(default_factory=CombatConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
@@ -372,6 +400,17 @@ class AppConfig:
             value = getattr(self.vision.world, name)
             if not 0.0 <= value <= 1.0:
                 problems.append(f"vision.world.{name} must be within 0..1")
+        wcfg = self.vision.world
+        if not 0 <= wcfg.enemy_red_min <= 255:
+            problems.append("vision.world.enemy_red_min must be within 0..255")
+        if not 0 <= wcfg.enemy_red_chroma <= 255:
+            problems.append("vision.world.enemy_red_chroma must be within 0..255")
+        if wcfg.enemy_min_blob_px < 1 or wcfg.enemy_max_blob_px < wcfg.enemy_min_blob_px:
+            problems.append(
+                "vision.world enemy blobs require 1 <= enemy_min_blob_px <= enemy_max_blob_px"
+            )
+        if not isinstance(wcfg.enemy_max_dots, int) or wcfg.enemy_max_dots < 1:
+            problems.append("vision.world.enemy_max_dots must be an int >= 1")
         if not isinstance(self.agent.phase, int) or self.agent.phase < 1:
             problems.append(f"agent.phase must be an int >= 1, got {self.agent.phase!r}")
         ctrl = self.control
@@ -424,6 +463,26 @@ class AppConfig:
                 parse_tasks(list(mission.tasks))
             except ValueError as exc:
                 problems.append(str(exc))
+        combat = self.combat
+        if combat.engage_min_wanted < 1:
+            problems.append("combat.engage_min_wanted must be >= 1")
+        if combat.engage_enemies < 1:
+            problems.append("combat.engage_enemies must be >= 1")
+        for name in ("health_drop_window_s", "incoming_fire_hold_s",
+                     "aim_interval_s", "aim_max_step_deg", "burst_s",
+                     "burst_interval_s", "retreat_step_s", "disengage_clear_s"):
+            if getattr(combat, name) <= 0:
+                problems.append(f"combat.{name} must be > 0")
+        if not 0.0 <= combat.health_drop_frac <= 1.0:
+            problems.append("combat.health_drop_frac must be within 0..1")
+        if not 0.0 <= combat.retreat_health_frac <= 1.0:
+            problems.append("combat.retreat_health_frac must be within 0..1")
+        if combat.aim_dead_zone_deg < 0:
+            problems.append("combat.aim_dead_zone_deg must be >= 0")
+        if combat.fire_button not in {"left", "right", "middle", "x1", "x2"}:
+            problems.append(
+                f"combat.fire_button must be a mouse button name, got {combat.fire_button!r}"
+            )
         dlg = self.vision.dialogue
         region = dlg.region
         if (
