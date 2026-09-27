@@ -3,7 +3,7 @@
 
 agent:
   name: rdr2-ai
-  phase: 10
+  phase: 11
   loop_hz: 10.0          # main decision-loop rate
 
 window:

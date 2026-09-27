@@ -211,13 +211,31 @@ code into the game, or interact with Red Dead Online.
   version bumped to 0.2.0, `-Doctor` switch in `run.ps1`.
 - Hands-on verification checklist (performed after all phases):
   1. `.\run.ps1 -Doctor` - all rows PASS or WARN.
-  2. `.\.venv\Scripts\python.exe tools\input_check.py` - keys/mouse land
-     where you expect (test window focused, not the game).
+  2. `.\run.ps1 -ControlTest` - guided live check of every input the
+     agent can send (Phase 11); or quick single-key checks with
+     `.\.venv\Scripts\python.exe tools\input_check.py`.
   3. `.\run.ps1 -Demo` with the game focused - observe the short input
      demo, F12 must kill it instantly.
   4. `.\run.ps1 -Autopilot -ExtraArgs @("--duration","30")` - scripted
      look/walk cycle with the HUD visible.
   5. Only then try mission/responder/combat/survival flags one at a time.
+
+### Phase 11 - control verification harness
+- `src/control_test.py` (`.\run.ps1 -ControlTest`): a guided, step-by-step
+  live test of **every input primitive the agent can send** - movement
+  (`control.keys`), camera pans, jump/interact taps, survival quick-use
+  keys, aim, and fire. Each step prints what you should see in game and
+  the matching command from [`docs/CONTROLS.md`](docs/CONTROLS.md), sends
+  it through the guarded `InputController` (game-window focus required),
+  and records your y/n verdict. The fire step is gated behind an explicit
+  `y`. `--dry-run` prints the plan without sending anything.
+- Abort any time with Ctrl+C - inputs are released in the shutdown path;
+  focus loss mid-step refuses/aborts the input automatically.
+- Summary line reports passed/failed/skipped plus sent/refused counters;
+  exit code 1 if any step failed (so the run is scriptable).
+- This is the "simple control verification" step of the agreed sequence:
+  run it in Story Mode before any autonomous behavior, then the demo and
+  autopilot runs.
 
 ## Architecture
 
@@ -225,6 +243,7 @@ code into the game, or interact with Red Dead Online.
 src/
   main.py              entry point: thread wiring, main decision loop
   doctor.py            self-check CLI (run with -Doctor before testing)
+  control_test.py      Phase 11 guided live input verification
   config.py            typed config dataclasses loaded from config.yaml
   capture/
     window_manager.py  find/track/focus the game window (Win32)
@@ -283,7 +302,9 @@ tools/
   calibrate_hud.py     live HUD detection preview for region tuning
   inspect_frames.py    save sample frames for verification
   input_check.py       test keyboard/mouse injection
-tests/                 474 tests (pytest)
+docs/
+  CONTROLS.md          full PC controls reference + agent key cross-map
+tests/                 512 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -346,6 +367,8 @@ HUD elements (leave a small margin around each core).
 
 ```powershell
 .\run.ps1 -Doctor                # environment self-check first
+.\run.ps1 -ControlTest           # guided live input verification (Phase 11)
+.\run.ps1 -ControlTest -ExtraArgs @("--dry-run")   # print the plan only
 .\run.ps1                     # normal run (debug window on)
 .\run.ps1 -Demo               # Phase 1 input demonstration
 .\run.ps1 -Headless -Record   # no debug window, record frames
@@ -459,6 +482,10 @@ synthetic backend ~24 fps, ~3 ms latency.
     docs: `ComponentGuard` fault isolation (a crashing component is
     disabled, inputs released, loop continues), `src.doctor` self-check,
     `rl.buffer_max` memory cap, packaging/version polish.
+11. **Phase 11 (done)** - control verification: full PC controls
+    reference (`docs/CONTROLS.md`) plus the `.\run.ps1 -ControlTest`
+    guided harness that sends every agent input primitive live and
+    records your verdict against the reference.
 
 Each phase ships with tests and stays revertible: the safety layer and manual
 hotkeys are never bypassed by later phases.
@@ -486,14 +513,49 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 474 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 512 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 .\run.ps1 -Doctor                            # environment self-check
+.\run.ps1 -ControlTest                       # guided input verification
 ```
 
 Conventions: type hints everywhere, no hardcoded tunables (config only),
 docstrings for public APIs, and the safety layer must remain reachable from
 any state.
+
+## Safety: the RDR2 installation is never touched
+
+The agent reads pixels and sends input - nothing else. Concretely, it only:
+
+1. reads screen frames from the game window (capture backends),
+2. sends synthetic keyboard/mouse events through the Windows `SendInput`
+   API (never via shell commands),
+3. enumerates and focuses the game window (Win32 window messages),
+4. writes logs, recordings and checkpoints **inside this project folder**
+   (`logs/`, `recordings/`, `learning/` - every configured output path is
+   resolved relative to `config.yaml`).
+
+It never opens, reads, writes, moves or deletes any file in the RDR2
+installation folder or the Rockstar settings folders
+(`Documents\Rockstar Games\...`, `%LOCALAPPDATA%\Rockstar Games\...`).
+There is no registry editing, no DLL injection, no process modification,
+no memory reading and no subprocess/shell usage anywhere in the codebase.
+
+Enforced, not just promised:
+
+- **Config validation refuses game paths**: `telemetry.dir`,
+  `recording.dir`, `rl.checkpoint` and `rl.buffer` raise a `ConfigError`
+  if their resolved path contains `Rockstar Games` or
+  `Red Dead Redemption 2` (the game folder and its settings stay
+  untouched even if misconfigured by hand).
+- **`tests/test_game_safety.py` scans the source** (`src/`, `tools/`) for
+  registry access (`winreg`), process spawning (`subprocess`),
+  shell execution (`os.system`/`os.popen`), file/tree deletion
+  (`os.remove`/`shutil.rmtree`), game-folder path literals and absolute
+  drive paths - so this guarantee cannot silently regress.
+- Note: RDR2's own autosave may run while you play (that is the game
+  process writing its own save data, exactly as when playing manually).
+  This software never opens those files.
 
 ## Disclaimer
 

@@ -16,6 +16,25 @@ import yaml
 
 DEFAULT_CONFIG_NAME = "config.yaml"
 
+GAME_DIR_MARKERS: tuple[str, ...] = (
+    "rockstar games",
+    "red dead redemption 2",
+)
+
+
+def game_dir_marker(path: str | Path) -> str | None:
+    """Return the forbidden game-folder marker found in *path*, else ``None``.
+
+    The RDR2 installation folder and the Rockstar settings folders must
+    never be written to by this project; config validation rejects every
+    configured output path that points inside them.
+    """
+    lowered = str(path).lower()
+    for marker in GAME_DIR_MARKERS:
+        if marker in lowered:
+            return marker
+    return None
+
 
 class ConfigError(Exception):
     """Raised when configuration cannot be loaded or is invalid."""
@@ -693,6 +712,22 @@ class AppConfig:
             problems.append("vision.dialogue.respond_cooldown_s must be > 0")
         if not isinstance(self.telemetry.log_level, str):
             problems.append("telemetry.log_level must be a string")
+
+        for write_name, write_value in (
+            ("telemetry.dir", self.telemetry.dir),
+            ("recording.dir", self.recording.dir),
+            ("rl.checkpoint", self.rl.checkpoint),
+            ("rl.buffer", self.rl.buffer),
+        ):
+            if not isinstance(write_value, str) or not write_value.strip():
+                continue  # empty/typed-wrong values are reported by their own checks
+            marker = game_dir_marker(self.resolve(write_value))
+            if marker is not None:
+                problems.append(
+                    f"{write_name} must not point inside the RDR2 installation "
+                    f"or Rockstar settings folders (path contains {marker!r}) - "
+                    "the game files must stay untouched"
+                )
 
         if problems:
             raise ConfigError("invalid configuration: " + "; ".join(problems))

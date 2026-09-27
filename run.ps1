@@ -6,6 +6,7 @@
 #   .\run.ps1 -Headless -Record
 #   .\run.ps1 -Backend mss -ExtraArgs @("--duration","30")
 #   .\run.ps1 -Doctor
+#   .\run.ps1 -ControlTest -ExtraArgs @("--dry-run")
 
 param(
     [switch]$Demo,
@@ -14,6 +15,7 @@ param(
     [switch]$Headless,
     [switch]$Record,
     [switch]$Doctor,
+    [switch]$ControlTest,
     [string]$Config = "",
     [string]$Backend = "",
     [string[]]$ExtraArgs = @()
@@ -32,6 +34,10 @@ if (-not (Test-Path $venvPython)) {
 if ($Doctor) {
     $argsList = @("-m", "src.doctor")
     if ($Config -ne "") { $argsList += @("--config", $Config) }
+} elseif ($ControlTest) {
+    $argsList = @("-m", "src.control_test")
+    if ($Config -ne "") { $argsList += @("--config", $Config) }
+    if ($ExtraArgs.Count -gt 0) { $argsList += $ExtraArgs }
 } else {
     $argsList = @("-m", "src.main")
     if ($Config -ne "") { $argsList += @("--config", $Config) }

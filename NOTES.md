@@ -55,7 +55,9 @@ between tasks; user answers (mission name / "free roam").
 
 ## Sequencing (agreed)
 1. Finish remaining roadmap phases (9-10) as currently scoped.
-2. Hands-on test run: simple control verification (input_check, demo,
-   locomotion against the live game).
+2. Hands-on test run: simple control verification - guided by
+   `.\run.ps1 -ControlTest` (Phase 11 harness, steps cross-referenced to
+   docs/CONTROLS.md), then input_check / demo / locomotion against the
+   live game.
 3. THEN revisit this file and implement the two modes, starting with
    the StoryRunner skeleton behind a disabled-by-default flag.
