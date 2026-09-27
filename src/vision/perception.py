@@ -17,6 +17,7 @@ import numpy as np
 
 from src.config import VisionConfig
 from src.state.game_state import GameState
+from src.vision.dialogue import DialogueReader, DialogueReading, match_keyword
 from src.vision.hud import HudDetection, HudReader, RegionReading, scale_regions
 from src.vision.ocr import OcrEngine, create_ocr
 from src.vision.world import WorldReader, WorldReading
@@ -28,9 +29,11 @@ _AMMO_RE = re.compile(r"\d{1,4}")
 class PerceptionResult:
     hud: HudDetection
     world: WorldReading
+    dialogue: DialogueReading
     prompt_text: str | None = None
     prompt_changed: bool = False
     ammo: int | None = None
+    encounter: str | None = None
     ocr_engine: str = "off"
     ocr_running: bool = False
     frame_id: int = 0
@@ -44,17 +47,25 @@ class Perception:
         self._cfg = cfg
         self._hud = HudReader(cfg.hud)
         self._world = WorldReader(cfg.world, cfg.hud)
+        self._dialogue = DialogueReader(cfg.dialogue)
         self._ocr = ocr if ocr is not None else create_ocr(cfg.ocr)
         self._every = max(1, cfg.ocr.every_n_frames)
+        self._dlg_every = max(1, cfg.dialogue.every_n_frames)
         self._counter = 0
         self._ammo_counter = 0
+        self._dlg_counter = 0
         self._last_prompt: str = ""
+        self._last_dialogue_text: str = ""
         self._minimap_frac = cfg.hud.regions.get("minimap")
         self._ammo: int | None = None
 
     @property
     def last_prompt(self) -> str:
         return self._last_prompt
+
+    @property
+    def last_dialogue_text(self) -> str:
+        return self._last_dialogue_text
 
     @property
     def ocr_engine(self) -> str:
@@ -69,8 +80,10 @@ class Perception:
             scaled = scale_regions({"m": list(self._minimap_frac)}, fw, fh)
             minimap = scaled.get("m")
         world = self._world.process(frame, minimap)
+        dialogue = self._dialogue.process(frame)
         result = PerceptionResult(
-            hud=hud, world=world, frame_id=frame_id, ocr_engine=self._ocr.name,
+            hud=hud, world=world, dialogue=dialogue, frame_id=frame_id,
+            ocr_engine=self._ocr.name,
         )
 
         if self._cfg.hud.enabled and self._ocr.available:
@@ -95,12 +108,41 @@ class Perception:
                         match = _AMMO_RE.search(text)
                         if match:
                             self._ammo = int(match.group())
+        if dialogue.present and self._cfg.dialogue.enabled and self._ocr.available:
+            self._dlg_counter += 1
+            if self._dlg_counter % self._dlg_every == 0:
+                fh2, fw2 = frame.shape[:2]
+                dx, dy, dw, dh = self._cfg.dialogue.region
+                bx = int(dx * fw2)
+                by = int(dy * fh2)
+                bw = int(dw * fw2)
+                bh = int(dh * fh2)
+                text, conf = self._ocr.read(frame[by:by + bh, bx:bx + bw])
+                if text and conf * 100.0 >= self._cfg.ocr.min_confidence:
+                    self._last_dialogue_text = text
+        elif not dialogue.present:
+            self._dlg_counter = 0
+            self._last_dialogue_text = ""
         result.prompt_text = self._last_prompt or None
+        result.dialogue.text = self._last_dialogue_text or None
+        result.encounter = self._match_encounter(result)
         result.ammo = self._ammo
         if world.weapon is not None:
             world.weapon.ammo = self._ammo
         result.latency_ms = (time.perf_counter() - t0) * 1000.0
         return result
+
+    def _match_encounter(self, result: PerceptionResult) -> str | None:
+        """Match keywords against text that is on screen right now."""
+        keywords = self._cfg.dialogue.encounter_keywords
+        prompt_visible = result.hud.prompt is not None and result.hud.prompt.present
+        if prompt_visible:
+            hit = match_keyword(result.prompt_text, keywords)
+            if hit is not None:
+                return hit
+        if result.dialogue.present:
+            return match_keyword(result.dialogue.text, keywords)
+        return None
 
     def overlay_boxes(
         self, result: PerceptionResult
@@ -113,7 +155,8 @@ class Perception:
         """Project detections onto the shared game state (detections only)."""
         state.timestamp = time.time()
         state.frame_id = result.frame_id
-        state.source = "hud+world"
+        state.source = "hud+world+dialogue"
+        self._apply_dialogue(state, result)
         hud = result.hud
         if hud.skipped:
             return
@@ -148,6 +191,14 @@ class Perception:
             state.confidence.mission, state.confidence.combat,
         ]
         state.confidence.overall = round(sum(values) / len(values), 3)
+
+    def _apply_dialogue(self, state: GameState, result: PerceptionResult) -> None:
+        dialogue = result.dialogue
+        if dialogue.skipped:
+            return
+        state.dialogue.active = dialogue.present
+        state.dialogue.text = dialogue.text if dialogue.present else None
+        state.dialogue.encounter = result.encounter
 
     def _apply_world(self, state: GameState, result: PerceptionResult) -> None:
         world = result.world
@@ -217,6 +268,21 @@ def world_summary(result: PerceptionResult) -> dict[str, object]:
         "ammo": result.ammo,
         "horse_detected": bool(horse and horse.detected),
         "latency_ms": round(world.latency_ms, 2),
+    }
+
+
+def dialogue_summary(result: PerceptionResult) -> dict[str, object]:
+    """Compact dialogue snapshot for telemetry events."""
+    dialogue = result.dialogue
+    if dialogue.skipped:
+        return {"enabled": False}
+    return {
+        "enabled": True,
+        "present": dialogue.present,
+        "text": dialogue.text or "",
+        "encounter": result.encounter or "",
+        "confidence": round(dialogue.confidence, 3),
+        "latency_ms": round(dialogue.latency_ms, 2),
     }
 
 

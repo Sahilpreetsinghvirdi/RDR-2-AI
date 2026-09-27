@@ -110,6 +110,24 @@ code into the game, or interact with Red Dead Online.
 - Enabled via `mission.enabled: true` or `--mission`; takes precedence over
   `control.mode`. Off by default.
 
+### Phase 6 - dialogue, encounters, prompt reactions
+- New `src/vision/dialogue.py`: subtitle-band presence detection - a
+  bright-pixel fraction test over `vision.dialogue.region` (bottom-center
+  band) marks subtitles visible or not; `match_keyword()` checks configured
+  encounter keywords against on-screen text (case-insensitive, first match).
+- Perception OCRs the subtitle band only while it is visible (every
+  `dialogue.every_n_frames` frames) and matches encounter keywords against
+  text that is **on screen right now**: the visible prompt or the visible
+  subtitle - a stale prompt never re-fires after it disappears.
+- New `DialogueState` on `GameState` (`active`/`text`/`encounter`), plus a
+  `DIALOG` overlay line and a `dialogue` telemetry block.
+- New `src/mission/respond.py`: `PromptResponder` taps the key mapped in
+  `vision.dialogue.respond_to` (e.g. `greet -> interact`) when an encounter
+  keyword is detected, rate-limited by `respond_cooldown_s`; a refused tap
+  does not consume the cooldown. Off while the Phase 1 demo runs.
+- Arm it by filling `vision.dialogue.respond_to` (empty by default - the
+  agent observes encounters without reacting until you choose mappings).
+
 ## Architecture
 
 ```
@@ -136,6 +154,7 @@ src/
     fast_pass.py       cheap grayscale downscale stats (motion/brightness)
     hud.py             region detectors: gauges, minimap, prompts, stars
     world.py           world estimators: minimap, sky, weapon, horse
+    dialogue.py        subtitle band presence + encounter keywords (Phase 6)
     ocr.py             pluggable OCR (tesseract) with graceful fallback
     perception.py      per-frame orchestration -> GameState
   telemetry/
@@ -153,13 +172,14 @@ src/
   mission/
     tasks.py           Phase 5 task model + config parser
     runner.py          Phase 5 mission executor (MISSION n/N status)
+    respond.py         Phase 6 prompt responder (encounter -> key tap)
   ai/ ai/rl/           reserved for later phases
 tools/
   calibrate_capture.py measure capture fps/latency
   calibrate_hud.py     live HUD detection preview for region tuning
   inspect_frames.py    save sample frames for verification
   input_check.py       test keyboard/mouse injection
-tests/                 272 tests (pytest)
+tests/                 310 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -273,7 +293,7 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | `safety`    | F12/F11/F10 bindings, watchdog stalls, startup grace, release rules |
 | `control`   | autopilot on/off, `mode` (script/route), movement keys, look sensitivity, `nav` legs/gains/stalls |
 | `mission`   | task list (`turn`/`walk`/`wait`/`wait_for`/`interact`/`log`), `loop` restart |
-| `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators, `ocr` engine/throttling |
+| `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators, `dialogue` band/keywords/reactions, `ocr` engine/throttling |
 | `debug`     | dashboard window, `show_overlay`/`show_hud` boxes, panel width |
 | `recording` | fps, format, max frames, state jsonl |
 | `telemetry` | console/file logs, `events.jsonl`, metrics interval, log level |
@@ -312,7 +332,9 @@ synthetic backend ~24 fps, ~3 ms latency.
 5. **Phase 5 (done)** - mission/task framework and goal management: config
    tasks executed in order with blocking waits, state conditions and a
    fail-stop policy.
-6. **Phase 6** - dialogue, encounters, and camp interactions.
+6. **Phase 6 (done)** - dialogue, encounters, and camp interactions:
+   subtitle-band detection, encounter keyword matching against visible
+   prompt/subtitle text, and configurable prompt reactions.
 7. **Phase 7** - combat and self-defense behaviors.
 8. **Phase 8** - survival systems (food, camp, crafting, economy).
 9. **Phase 9** - learned/optimized policies (RL) on top of scripted skills.
@@ -343,7 +365,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 272 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 310 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 ```
 

@@ -48,6 +48,10 @@ class AgentStatus:
     world_ammo: int | None = None
     world_horse_detected: bool = False
     world_ms: float = 0.0
+    dialogue_active: bool | None = None
+    dialogue_text: str = ""
+    dialogue_encounter: str = ""
+    dialogue_ms: float = 0.0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

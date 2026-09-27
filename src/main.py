@@ -26,6 +26,7 @@ from src.config import AppConfig, ConfigError, load_config, save_effective_confi
 from src.control.locomotion import LocomotionController
 from src.demo import Phase1Demo
 from src.input.input_controller import InputController
+from src.mission.respond import PromptResponder
 from src.mission.runner import MissionRunner
 from src.planning.route import RoutePlanner
 from src.planning.scripted import ScriptedPlanner
@@ -38,7 +39,13 @@ from src.telemetry.logger import EventLog, setup_logging
 from src.telemetry.recorder import SessionRecorder
 from src.ui.dashboard import Dashboard
 from src.vision.fast_pass import FastPass
-from src.vision.perception import Perception, PerceptionResult, hud_summary, world_summary
+from src.vision.perception import (
+    Perception,
+    PerceptionResult,
+    dialogue_summary,
+    hud_summary,
+    world_summary,
+)
 
 log = logging.getLogger(__name__)
 
@@ -140,6 +147,14 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             planner = ScriptedPlanner(cfg.control, locomotion)
             log.info("autopilot enabled - scripted locomotion active while RUNNING")
 
+    responder: PromptResponder | None = None
+    if cfg.vision.dialogue.respond_to:
+        responder = PromptResponder(cfg.vision.dialogue, locomotion)
+        log.info(
+            "prompt responder armed: %s",
+            ", ".join(f"{k}->{v}" for k, v in cfg.vision.dialogue.respond_to.items()),
+        )
+
     events_path = cfg.resolve(cfg.telemetry.dir) / cfg.telemetry.events_file
     events = EventLog(events_path if cfg.telemetry.file else None)
 
@@ -213,7 +228,7 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         rc = _agent_loop(
             cfg, args, machine, heartbeats, wm, capture, fast, perception,
             game_state, status, input_ctrl, recorder, events, demo, started,
-            locomotion, planner,
+            locomotion, planner, responder,
         )
     except KeyboardInterrupt:
         log.warning("interrupted by user (Ctrl+C)")
@@ -305,6 +320,7 @@ def _agent_loop(
     started: float,
     locomotion: LocomotionController,
     planner: ScriptedPlanner | RoutePlanner | MissionRunner | None,
+    responder: PromptResponder | None = None,
 ) -> int:
     period = 1.0 / max(1.0, cfg.agent.loop_hz)
     hz = 0.0
@@ -353,7 +369,7 @@ def _agent_loop(
         if state is AgentState.RUNNING:
             last_pres = _run_active_work(
                 cfg, capture, fast, perception, game_state, packet, info, status,
-                input_ctrl, recorder, demo, events, locomotion, planner,
+                input_ctrl, recorder, demo, events, locomotion, planner, responder,
             )
         else:
             locomotion.stop()
@@ -397,6 +413,7 @@ def _agent_loop(
                 window="found" if info is not None else "missing",
                 hud=hud_summary(last_pres) if last_pres is not None else None,
                 world=world_summary(last_pres) if last_pres is not None else None,
+                dialogue=dialogue_summary(last_pres) if last_pres is not None else None,
             )
             log.debug(
                 "metrics: %.1f Hz, capture %.1f fps (%.1f ms), vision %.1f ms, input %s",
@@ -424,6 +441,7 @@ def _run_active_work(
     events: EventLog,
     locomotion: LocomotionController,
     planner: ScriptedPlanner | RoutePlanner | MissionRunner | None,
+    responder: PromptResponder | None = None,
 ) -> PerceptionResult | None:
     if info is None:
         locomotion.stop()
@@ -483,6 +501,12 @@ def _run_active_work(
         world_ammo=pres.ammo,
         world_horse_detected=bool(horse is not None and horse.detected),
         world_ms=round(world.latency_ms, 2),
+        dialogue_active=(
+            None if pres.dialogue.skipped else pres.dialogue.present
+        ),
+        dialogue_text=pres.dialogue.text or "",
+        dialogue_encounter=pres.encounter or "",
+        dialogue_ms=round(pres.dialogue.latency_ms, 2),
         goal=(
             f"IDLE (phase {cfg.agent.phase})"
             if demo is None or not demo.active else "VERIFY_INPUT"
@@ -501,6 +525,9 @@ def _run_active_work(
         planner.step(time.monotonic(), status, packet.image, game_state)
     elif demo is not None:
         status.update(goal=f"IDLE (phase {cfg.agent.phase})", action="none")
+
+    if responder is not None and (demo is None or not demo.active):
+        responder.step(time.monotonic(), status, game_state)
 
     if recorder is not None:
         recorder.record(packet, status.to_dict())

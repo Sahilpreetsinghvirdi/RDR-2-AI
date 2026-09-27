@@ -76,6 +76,15 @@ class ThreatState:
 
 
 @dataclass
+class DialogueState:
+    """Subtitle band + encounter keyword detections (Phase 6)."""
+
+    active: bool | None = None     # None until first dialogue pass
+    text: str | None = None        # last OCR'd subtitle/prompt text
+    encounter: str | None = None   # matched encounter_keyword, if any
+
+
+@dataclass
 class Confidence:
     overall: float = 0.0
     player: float = 0.0
@@ -96,6 +105,7 @@ class GameState:
     environment: EnvironmentState = field(default_factory=EnvironmentState)
     mission: MissionState = field(default_factory=MissionState)
     threat: ThreatState = field(default_factory=ThreatState)
+    dialogue: DialogueState = field(default_factory=DialogueState)
     nearby_entities: list[EntityDetection] = field(default_factory=list)
     confidence: Confidence = field(default_factory=Confidence)
     frame_id: int | None = None

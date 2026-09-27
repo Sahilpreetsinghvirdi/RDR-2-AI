@@ -215,11 +215,34 @@ class WorldConfig:
 
 
 @dataclass
+class DialogueConfig:
+    """Subtitle/dialogue perception and prompt-driven reactions (Phase 6)."""
+
+    enabled: bool = True
+    region: list[float] = field(
+        default_factory=lambda: [0.20, 0.82, 0.60, 0.07]  # subtitle band
+    )
+    bright_luma: int = 150         # subtitle pixels are bright on dark ground
+    min_text_frac: float = 0.015   # bright fraction counted as "subtitle present"
+    every_n_frames: int = 2        # OCR only 1/N frames while text is present
+    encounter_keywords: list[str] = field(
+        default_factory=lambda: [
+            "greet", "antagonize", "talk", "rob", "mount", "skin", "loot",
+        ]
+    )
+    respond_to: dict[str, str] = field(
+        default_factory=dict         # keyword -> control key name (e.g. interact)
+    )
+    respond_cooldown_s: float = 2.0
+
+
+@dataclass
 class VisionConfig:
     fast: FastPassConfig = field(default_factory=FastPassConfig)
     hud: HudConfig = field(default_factory=HudConfig)
     ocr: OcrConfig = field(default_factory=OcrConfig)
     world: WorldConfig = field(default_factory=WorldConfig)
+    dialogue: DialogueConfig = field(default_factory=DialogueConfig)
 
 
 @dataclass
@@ -401,6 +424,42 @@ class AppConfig:
                 parse_tasks(list(mission.tasks))
             except ValueError as exc:
                 problems.append(str(exc))
+        dlg = self.vision.dialogue
+        region = dlg.region
+        if (
+            not isinstance(region, (list, tuple)) or len(region) != 4
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                       for v in region)
+            or region[2] <= 0 or region[3] <= 0
+            or any(v < 0 or v > 1 for v in region)
+        ):
+            problems.append(
+                "vision.dialogue.region must be [x, y, w, h] within 0..1 (w, h > 0)"
+            )
+        if not 0.0 <= dlg.min_text_frac <= 1.0:
+            problems.append("vision.dialogue.min_text_frac must be within 0..1")
+        if not 0 <= dlg.bright_luma <= 255:
+            problems.append("vision.dialogue.bright_luma must be within 0..255")
+        if not isinstance(dlg.every_n_frames, int) or isinstance(dlg.every_n_frames, bool) \
+                or dlg.every_n_frames < 1:
+            problems.append("vision.dialogue.every_n_frames must be an int >= 1")
+        if not isinstance(dlg.encounter_keywords, list) or any(
+            not isinstance(k, str) or not k.strip() for k in dlg.encounter_keywords
+        ):
+            problems.append("vision.dialogue.encounter_keywords must be a list of strings")
+        if not isinstance(dlg.respond_to, dict):
+            problems.append("vision.dialogue.respond_to must be a keyword -> key mapping")
+        else:
+            for kw, keyname in dlg.respond_to.items():
+                if not isinstance(kw, str) or not kw.strip():
+                    problems.append("vision.dialogue.respond_to keywords must be strings")
+                if keyname not in ctrl.keys:
+                    problems.append(
+                        f"vision.dialogue.respond_to[{kw!r}] must name a control.keys "
+                        f"entry, got {keyname!r}"
+                    )
+        if dlg.respond_cooldown_s <= 0:
+            problems.append("vision.dialogue.respond_cooldown_s must be > 0")
         if not isinstance(self.telemetry.log_level, str):
             problems.append("telemetry.log_level must be a string")
 

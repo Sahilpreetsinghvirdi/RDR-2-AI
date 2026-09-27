@@ -70,6 +70,13 @@ def build_lines(status: AgentStatus) -> list[str]:
         if len(prompt) > 62:
             prompt = prompt[:59] + "..."
         lines.append("PROMPT : " + prompt)
+    if status.dialogue_active or status.dialogue_text:
+        state = "ON " if status.dialogue_active else "OFF"
+        text = status.dialogue_text or "(reading...)"
+        if len(text) > 54:
+            text = text[:51] + "..."
+        encounter = f"  enc={status.dialogue_encounter}" if status.dialogue_encounter else ""
+        lines.append(f"DIALOG : {state} {text}{encounter}")
     if status.demo_step:
         lines.append("DEMO   : " + status.demo_step)
     if status.message:

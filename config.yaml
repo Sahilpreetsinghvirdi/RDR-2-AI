@@ -3,7 +3,7 @@
 
 agent:
   name: rdr2-ai
-  phase: 5
+  phase: 6
   loop_hz: 10.0          # main decision-loop rate
 
 window:
@@ -149,6 +149,16 @@ vision:
     sky_max_std: 35.0         # sky uniformity for clear vs cloudy
     ammo_min_bright_frac: 0.004
     ammo_min_luma: 170.0
+  dialogue:
+    enabled: true              # subtitle presence + encounter keyword matching
+    region: [0.20, 0.82, 0.60, 0.07]  # subtitle band (fractions of the frame)
+    bright_luma: 150           # subtitle text is bright on dark ground
+    min_text_frac: 0.015       # bright fraction that counts as "text present"
+    every_n_frames: 2          # OCR cadence while subtitles are visible
+    encounter_keywords:        # prompt/subtitle words treated as encounters
+      [greet, antagonize, talk, rob, mount, skin, loot]
+    respond_to: {}             # keyword -> control key, e.g. {greet: interact}
+    respond_cooldown_s: 2.0    # minimum gap between automatic reactions
 
 debug:
   gui: true
