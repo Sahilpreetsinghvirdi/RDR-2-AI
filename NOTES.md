@@ -1,7 +1,7 @@
 # Notes: Two Planned Modes (DESIGN ONLY - NOT IMPLEMENTED)
 
 Status: **notes only** (per user decision). Do not implement until all
-phases (1-10) are complete AND basic control test runs (simple
+phases (1-11) are complete AND basic control test runs (simple
 keyboard/mouse input verification) have been done first.
 
 ## Mode 1 - Full Autonomous Story Mode

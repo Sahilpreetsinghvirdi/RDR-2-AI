@@ -201,6 +201,21 @@ class PolicyPlanner:
         )
         return True
 
+    def stop(self) -> None:
+        """Clear pending transition bookkeeping (pause / takeover / fault).
+
+        The half-recorded action pair is dropped rather than rewarded across
+        a pause, so the next action starts a fresh episode boundary. Cheap
+        and idempotent - the loop calls it every tick while not RUNNING.
+        """
+        if self._last is None and self._prev is None and self._prev_action_at is None:
+            return
+        self._last = None
+        self._prev = None
+        self._prev_action_at = None
+        self._next_at = 0.0
+        log.debug("rl: cleared pending transition on stop")
+
     def close(self) -> Path | None:
         """Persist the recorded buffer (returns its path, if anything saved)."""
         if self._closed or self._buffer is None or len(self._buffer) == 0:

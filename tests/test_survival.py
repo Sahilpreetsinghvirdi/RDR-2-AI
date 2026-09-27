@@ -210,6 +210,21 @@ class TestSurvivalPlanner:
         assert planner.busy is False
         assert planner.completed == 0
 
+    def test_stop_halts_running_remedy_and_clears_state(self) -> None:
+        planner, fake, status, _ = make_survival(keys=["i", "e"], gap_s=0.5)
+        gs = low_state(health=0.2)
+        planner.step(100.0, status, None, gs)   # remedy starts
+        planner.step(100.1, status, None, gs)   # press 1, gap running
+        assert fake.presses == ["i"]
+        assert planner.busy is True
+        assert gs.survival.active_remedy == "eat"
+        planner.stop(gs)
+        assert planner.busy is False
+        assert gs.survival.active_remedy is None
+        planner.stop()                          # idempotent when idle
+        assert planner.busy is False
+        assert fake.presses == ["i"]  # stop sent no extra keys
+
 
 class TestSurvivalConfigValidation:
     def test_default_config_valid(self) -> None:

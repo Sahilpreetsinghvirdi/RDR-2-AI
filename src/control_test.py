@@ -193,7 +193,10 @@ def run_steps(
             prompt = "  send it? [enter]=skip  y=fire  q=quit > "
         choice = input_fn(prompt).strip().lower()
         if choice == "q":
-            out("  quitting")
+            remaining = len(steps) - index + 1  # current + untried steps
+            skipped += remaining
+            out(f"  aborted at step {index}/{len(steps)} "
+                f"({remaining} marked skipped)")
             break
         if choice in {"n", "s", "no"}:
             skipped += 1

@@ -329,6 +329,29 @@ def _make_fault_handler(
     return handler
 
 
+def _halt_drivers(
+    locomotion: LocomotionController,
+    combat: CombatPlanner | None,
+    survival: SurvivalPlanner | None,
+    policy_planner: PolicyPlanner | None,
+    game_state: GameState,
+) -> None:
+    """Release movement/fire and reset mid-sequence driver state.
+
+    Used whenever the loop must stop acting (pause, takeover, missing or
+    stale frames, focus lost): locomotion releases its held keys, combat
+    releases the fire button, an in-flight survival remedy is aborted and
+    the RL planner drops its pending half-recorded transition.
+    """
+    locomotion.stop()
+    if combat is not None:
+        combat.stop()
+    if survival is not None:
+        survival.stop(game_state)
+    if policy_planner is not None:
+        policy_planner.stop()
+
+
 def _on_mode_change(events: EventLog, status: StatusTracker, mode: str, active: bool) -> None:
     events.emit("mode", mode=mode, active=active)
     if mode == "pause":
@@ -437,9 +460,7 @@ def _agent_loop(
                 assessor, combat, survival, policy_planner, guard,
             )
         else:
-            locomotion.stop()
-            if combat is not None:
-                combat.stop()
+            _halt_drivers(locomotion, combat, survival, policy_planner, game_state)
             status.update(
                 state=state.value,
                 action="none",
@@ -522,15 +543,11 @@ def _run_active_work(
     if guard is None:
         guard = ComponentGuard()
     if info is None:
-        locomotion.stop()
-        if combat is not None:
-            combat.stop()
+        _halt_drivers(locomotion, combat, survival, policy_planner, game_state)
         status.update(action="none", message="waiting for RDR2 window")
         return None
     if packet is None:
-        locomotion.stop()
-        if combat is not None:
-            combat.stop()
+        _halt_drivers(locomotion, combat, survival, policy_planner, game_state)
         status.update(
             action="none",
             frame_id=0,
@@ -539,9 +556,7 @@ def _run_active_work(
         )
         return None
     if packet.age_ms > cfg.capture.max_frame_age_ms:
-        locomotion.stop()
-        if combat is not None:
-            combat.stop()
+        _halt_drivers(locomotion, combat, survival, policy_planner, game_state)
         status.update(
             action="none", frame_age_ms=round(packet.age_ms, 1),
             message=f"stale frame ({packet.age_ms:.0f}ms > "
@@ -549,9 +564,7 @@ def _run_active_work(
         )
         return None
     if not info.focused:
-        locomotion.stop()
-        if combat is not None:
-            combat.stop()
+        _halt_drivers(locomotion, combat, survival, policy_planner, game_state)
 
     result = fast.process(packet.image)
     pres = perception.process(packet.image, packet.frame_id)
@@ -617,6 +630,13 @@ def _run_active_work(
     survival_busy = False
     if demo is not None and demo.active:
         guard.call("demo", demo.step, status)
+        if guard.is_disabled("demo"):
+            demo.active = False
+            status.update(
+                goal=f"IDLE (phase {cfg.agent.phase})",
+                action="none",
+                demo_step="failed - demo disabled",
+            )
     else:
         if combat is not None:
             guard.call("combat", combat.step, time.monotonic(), status,

@@ -578,6 +578,20 @@ class TestPolicyPlanner:
         planner, _ = make_planner(tmp_path, mode="random")
         assert planner.close() is None
 
+    def test_stop_clears_pending_transition(self, tmp_path: Path) -> None:
+        planner, _ = make_planner(tmp_path, mode="random")
+        status = StatusTracker(9)
+        planner.step(100.0, status, None, GameState())
+        assert planner._last is not None
+        assert planner._prev_action_at == 100.0
+        planner.stop()
+        assert planner._last is None
+        assert planner._prev is None
+        assert planner._prev_action_at is None
+        assert planner._next_at == 0.0
+        planner.stop()  # idempotent when already cleared
+        assert planner.steps == 1
+
     def test_buffer_max_bounds_planner_buffer(self, tmp_path: Path) -> None:
         planner, _ = make_planner(tmp_path, mode="random",
                                   action_interval_s=0.0, buffer_max=5)

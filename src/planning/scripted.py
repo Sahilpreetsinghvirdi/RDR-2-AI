@@ -76,19 +76,19 @@ class ScriptedPlanner:
             self._turn_remaining = remaining - step
             if not applied:
                 self._turn_remaining = 0.0
-            status.update(action=_label(action), goal="AUTOPILOT (phase 4)")
+            status.update(action=_label(action), goal=f"AUTOPILOT (phase {status.phase})")
             if abs(self._turn_remaining) < 1e-6:
                 self._advance()
         elif kind == "move":
-            status.update(action=_label(action), goal="AUTOPILOT (phase 4)")
+            status.update(action=_label(action), goal=f"AUTOPILOT (phase {status.phase})")
             if not self._locomotion.active:
                 self._advance()
         elif kind == "wait":
-            status.update(action=_label(action), goal="AUTOPILOT (phase 4)")
+            status.update(action=_label(action), goal=f"AUTOPILOT (phase {status.phase})")
             if now >= self._wait_until:
                 self._advance()
         else:  # tap
-            status.update(action=_label(action), goal="AUTOPILOT (phase 4)")
+            status.update(action=_label(action), goal=f"AUTOPILOT (phase {status.phase})")
             self._advance()
 
     def _begin(self, action: Action, now: float) -> None:

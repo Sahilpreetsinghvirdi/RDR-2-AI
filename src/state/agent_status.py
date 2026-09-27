@@ -76,6 +76,11 @@ class StatusTracker:
         self._lock = threading.Lock()
         self._status = AgentStatus(phase=phase)
 
+    @property
+    def phase(self) -> int:
+        with self._lock:
+            return self._status.phase
+
     def update(self, **kwargs: object) -> None:
         with self._lock:
             for key, value in kwargs.items():

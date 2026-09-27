@@ -86,6 +86,14 @@ class SurvivalPlanner:
         self._sequence = []
         self._index = 0
 
+    def stop(self, game_state: GameState | None = None) -> None:
+        """Halt any running remedy (pause / takeover / fault); safe repeatedly."""
+        if self._active is None and self._index == 0:
+            return
+        self.abort()
+        if game_state is not None:
+            game_state.survival.active_remedy = None
+
     def _remedies(self) -> list[tuple[str, RemedyConfig]]:
         if not isinstance(self._cfg.remedies, dict):
             return []
@@ -130,7 +138,8 @@ class SurvivalPlanner:
             log.info(
                 "survival: starting remedy %r (%d keys)", name, len(self._sequence)
             )
-            status.update(goal="SURVIVAL (phase 8)", action=f"survival:{name}")
+            status.update(goal=f"SURVIVAL (phase {status.phase})",
+                          action=f"survival:{name}")
             return
 
     def _advance(
@@ -162,7 +171,7 @@ class SurvivalPlanner:
         self._next_at = now + remedy.gap_s
         status.update(
             action=f"survival:{name} {self._index}/{len(self._sequence)}",
-            goal="SURVIVAL (phase 8)",
+            goal=f"SURVIVAL (phase {status.phase})",
         )
         if self._index >= len(self._sequence):
             self._runs[name] = now

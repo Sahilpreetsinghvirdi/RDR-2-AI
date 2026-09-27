@@ -16,6 +16,7 @@ import argparse
 import importlib
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from src.config import AppConfig, ConfigError, load_config
 
@@ -114,6 +115,28 @@ def check_input() -> CheckResult:
     )
 
 
+def check_output_dirs(cfg: AppConfig) -> CheckResult:
+    """WARN when a configured write path resolves outside the project folder."""
+    root = Path(cfg.project_root).resolve()
+    names = ("telemetry.dir", "recording.dir", "rl.checkpoint", "rl.buffer")
+    values = (
+        cfg.telemetry.dir, cfg.recording.dir, cfg.rl.checkpoint, cfg.rl.buffer,
+    )
+    outside: list[str] = []
+    for name, value in zip(names, values, strict=True):
+        try:
+            cfg.resolve(value).resolve().relative_to(root)
+        except (ValueError, OSError):
+            outside.append(name)
+    if outside:
+        return CheckResult(
+            "outputs", "warn",
+            f"outside project folder: {', '.join(outside)} "
+            f"(project: {root})",
+        )
+    return CheckResult("outputs", "pass", "all output paths inside project")
+
+
 def run_checks(config_path: str | None = None) -> list[CheckResult]:
     """Run every check; never raises (a broken config becomes a FAIL row)."""
     results = [check_python(), check_imports(), check_tesseract()]
@@ -134,6 +157,7 @@ def run_checks(config_path: str | None = None) -> list[CheckResult]:
         results.append(CheckResult("config", "warn", warning))
     results.append(check_window(cfg))
     results.append(check_log_dir(cfg))
+    results.append(check_output_dirs(cfg))
     results.append(check_input())
     return results
 

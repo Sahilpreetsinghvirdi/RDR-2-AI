@@ -31,9 +31,19 @@ if (-not (Test-Path $venvPython)) {
     exit 1
 }
 
+if ($Doctor -and $ControlTest) {
+    Write-Error "-Doctor and -ControlTest are mutually exclusive - pick one"
+    exit 1
+}
+if (($Doctor -or $ControlTest) -and ($Demo -or $Autopilot -or $Mission -or $Headless -or $Record -or ($Backend -ne ""))) {
+    Write-Error "-Demo/-Autopilot/-Mission/-Headless/-Record/-Backend apply to agent runs only, not to -Doctor/-ControlTest"
+    exit 1
+}
+
 if ($Doctor) {
     $argsList = @("-m", "src.doctor")
     if ($Config -ne "") { $argsList += @("--config", $Config) }
+    if ($ExtraArgs.Count -gt 0) { $argsList += $ExtraArgs }
 } elseif ($ControlTest) {
     $argsList = @("-m", "src.control_test")
     if ($Config -ne "") { $argsList += @("--config", $Config) }

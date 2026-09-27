@@ -165,7 +165,7 @@ class TestRunSteps:
             out=lambda _line: None,
             sleep=lambda _s: None,
         )
-        assert (passed, failed, skipped) == (0, 1, 0)
+        assert (passed, failed, skipped) == (0, 1, 2)  # q counts current+rest as skipped
         assert failures == ["walk forward"]
 
     def test_refused_input_counts_as_failure(self) -> None:

@@ -304,7 +304,7 @@ tools/
   input_check.py       test keyboard/mouse injection
 docs/
   CONTROLS.md          full PC controls reference + agent key cross-map
-tests/                 512 tests (pytest)
+tests/                 517 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -513,7 +513,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 512 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 517 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 .\run.ps1 -Doctor                            # environment self-check
 .\run.ps1 -ControlTest                       # guided input verification
@@ -540,6 +540,9 @@ installation folder or the Rockstar settings folders
 (`Documents\Rockstar Games\...`, `%LOCALAPPDATA%\Rockstar Games\...`).
 There is no registry editing, no DLL injection, no process modification,
 no memory reading and no subprocess/shell usage anywhere in the codebase.
+The one library that *does* spawn a process - `pytesseract` invoking the
+standalone `tesseract` OCR binary - runs only for prompt/objective text
+reading and touches nothing but the screen frames it is handed.
 
 Enforced, not just promised:
 

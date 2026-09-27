@@ -16,7 +16,7 @@ def test_run_checks_covers_essentials() -> None:
     assert all(isinstance(r, CheckResult) for r in results)
     assert all(r.status in {"pass", "warn", "fail"} for r in results)
     names = {r.name for r in results}
-    assert {"python", "imports", "tesseract", "config"} <= names
+    assert {"python", "imports", "tesseract", "config", "outputs"} <= names
     python = next(r for r in results if r.name == "python")
     assert python.status == "pass"
     config = next(r for r in results if r.name == "config")
@@ -58,3 +58,23 @@ def test_log_dir_check_passes(tmp_path: Path) -> None:
     results = run_checks(CONFIG_PATH)
     logs = next(r for r in results if r.name == "logs")
     assert logs.status == "pass"
+
+
+def test_outputs_check_passes_inside_project() -> None:
+    results = run_checks(CONFIG_PATH)
+    outputs = next(r for r in results if r.name == "outputs")
+    assert outputs.status == "pass"
+    assert "all output paths inside project" in outputs.detail
+
+
+def test_outputs_check_warns_when_outside(tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    outside = tmp_path / "outside_logs"
+    cfg = proj / "outside.yaml"
+    cfg.write_text(f"telemetry:\n  dir: {outside.as_posix()}\n", encoding="utf-8")
+    results = run_checks(str(cfg))
+    outputs = next(r for r in results if r.name == "outputs")
+    assert outputs.status == "warn"
+    assert "telemetry.dir" in outputs.detail
+    assert main(["--config", str(cfg)]) == 0  # warn never fails the run

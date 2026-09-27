@@ -79,7 +79,8 @@ class CombatPlanner:
         if health is not None and health <= self._cfg.retreat_health_frac:
             self._locomotion.move("back", self._cfg.retreat_step_s)
             status.update(
-                action="combat:retreat", goal="COMBAT (phase 7)",
+                action="combat:retreat",
+                goal=f"COMBAT (phase {status.phase})",
             )
             return "retreat"
 
@@ -88,7 +89,7 @@ class CombatPlanner:
             label = "combat:aim"
         if self._try_fire(now, game_state):
             label = "combat:fire"
-        status.update(action=label, goal="COMBAT (phase 7)")
+        status.update(action=label, goal=f"COMBAT (phase {status.phase})")
         return label
 
     def stop(self) -> None:
@@ -114,7 +115,8 @@ class CombatPlanner:
         self._next_aim = now
         self._locomotion.stop()
         log.warning("combat engaged (%s)", reason)
-        status.update(goal="COMBAT (phase 7)", action=f"combat:{reason}")
+        status.update(goal=f"COMBAT (phase {status.phase})",
+                      action=f"combat:{reason}")
 
     def _disengage(self, status: StatusTracker) -> None:
         self.stop()
