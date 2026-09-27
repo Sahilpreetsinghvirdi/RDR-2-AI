@@ -178,6 +178,8 @@ class Perception:
             state.confidence.mission = hud.prompt.confidence
             if result.prompt_text:
                 state.mission.prompt_text = result.prompt_text
+        else:
+            state.mission.prompt_text = None
 
         if hud.wanted is not None and hud.wanted.value:
             state.threat.wanted_level = int(hud.wanted.value)

@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable
 
 from src import __version__
+from src.ai.rl.planner import PolicyPlanner, rl_summary
 from src.ai.threat import ThreatAssessor
 from src.capture.screen_capture import FramePacket, ScreenCapture
 from src.capture.window_manager import (
@@ -171,6 +172,21 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             "survival enabled - %d remedies armed",
             len(cfg.survival.remedies),
         )
+    policy_planner: PolicyPlanner | None = None
+    if cfg.rl.enabled:
+        policy_planner = PolicyPlanner(
+            cfg.rl,
+            locomotion,
+            checkpoint_path=cfg.resolve(cfg.rl.checkpoint),
+            buffer_path=cfg.resolve(cfg.rl.buffer),
+        )
+        if policy_planner.active:
+            log.info(
+                "rl enabled - mode=%s explore=%.2f record=%s",
+                cfg.rl.mode, cfg.rl.explore, cfg.rl.record,
+            )
+        else:
+            log.warning("rl enabled but inactive: %s", policy_planner.reason)
 
     events_path = cfg.resolve(cfg.telemetry.dir) / cfg.telemetry.events_file
     events = EventLog(events_path if cfg.telemetry.file else None)
@@ -246,6 +262,7 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             cfg, args, machine, heartbeats, wm, capture, fast, perception,
             game_state, status, input_ctrl, recorder, events, demo, started,
             locomotion, planner, responder, assessor, combat, survival,
+            policy_planner,
         )
     except KeyboardInterrupt:
         log.warning("interrupted by user (Ctrl+C)")
@@ -271,6 +288,10 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             render_thread.join(2.0)
         if recorder is not None:
             recorder.close()
+        if policy_planner is not None:
+            saved = policy_planner.close()
+            if saved is not None:
+                events.emit("rl_buffer", path=str(saved))
         events.emit(
             "shutdown",
             state=machine.state.value,
@@ -341,6 +362,7 @@ def _agent_loop(
     assessor: ThreatAssessor | None = None,
     combat: CombatPlanner | None = None,
     survival: SurvivalPlanner | None = None,
+    policy_planner: PolicyPlanner | None = None,
 ) -> int:
     period = 1.0 / max(1.0, cfg.agent.loop_hz)
     hz = 0.0
@@ -390,7 +412,7 @@ def _agent_loop(
             last_pres = _run_active_work(
                 cfg, capture, fast, perception, game_state, packet, info, status,
                 input_ctrl, recorder, demo, events, locomotion, planner, responder,
-                assessor, combat, survival,
+                assessor, combat, survival, policy_planner,
             )
         else:
             locomotion.stop()
@@ -439,6 +461,7 @@ def _agent_loop(
                 dialogue=dialogue_summary(last_pres) if last_pres is not None else None,
                 threat=threat_summary(game_state),
                 survival=survival_summary(game_state),
+                rl=rl_summary(policy_planner),
             )
             log.debug(
                 "metrics: %.1f Hz, capture %.1f fps (%.1f ms), vision %.1f ms, input %s",
@@ -470,6 +493,7 @@ def _run_active_work(
     assessor: ThreatAssessor | None = None,
     combat: CombatPlanner | None = None,
     survival: SurvivalPlanner | None = None,
+    policy_planner: PolicyPlanner | None = None,
 ) -> PerceptionResult | None:
     if info is None:
         locomotion.stop()
@@ -578,6 +602,10 @@ def _run_active_work(
         if not engaged and not survival_busy:
             if planner is not None:
                 planner.step(time.monotonic(), status, packet.image, game_state)
+            elif policy_planner is not None:
+                policy_planner.step(
+                    time.monotonic(), status, packet.image, game_state
+                )
             elif demo is not None:
                 status.update(
                     goal=f"IDLE (phase {cfg.agent.phase})", action="none"

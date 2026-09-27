@@ -3,7 +3,7 @@
 
 agent:
   name: rdr2-ai
-  phase: 8
+  phase: 9
   loop_hz: 10.0          # main decision-loop rate
 
 window:
@@ -132,6 +132,27 @@ survival:
         stamina: 0.4
         dead_eye: 0.4
     # Add more remedies (e.g. `heal`, `drink`), or set `eat: null` to remove.
+
+rl:
+  enabled: false               # learned policy control (Phase 9 scaffold)
+  mode: policy                 # policy = act from checkpoint
+                               # random = explore to bootstrap a buffer
+  checkpoint: learning/policy.npz   # train: python -m src.ai.rl.train
+  buffer: learning/buffer.npz  # transitions recorded while acting
+  record: true                 # append (observation, action, reward) while acting
+  explore: 0.1                 # chance of a random action while a policy runs
+  temperature: 1.0             # softmax sampling temperature (>0)
+  hidden: 16                   # MLP hidden units (must match the checkpoint)
+  action_interval_s: 0.5       # minimum gap between chosen actions
+  boundary_gap_s: 3.0          # a longer action gap starts a new episode
+                               # (keeps returns from bleeding across sessions)
+  turn_step_deg: 15.0          # camera turn used by turn_left/turn_right
+  step_s: 0.5                  # move burst used by forward/back/strafe/sprint
+  reward:                      # shaping from known deltas only (never guessed)
+    health: 1.0                # weight on health-core change per step
+    stamina: 0.5               # weight on stamina-core change per step
+    dead_eye: 0.5              # weight on dead-eye-core change per step
+    threat: 1.0                # per-step penalty x threat level (0..3)
 
 vision:
   fast:

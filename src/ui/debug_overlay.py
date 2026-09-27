@@ -88,6 +88,14 @@ def build_lines(status: AgentStatus) -> list[str]:
         active = status.survival_active or "-"
         low = status.survival_low or "-"
         lines.append(f"SURV   : remedy {active}  low cores {low}")
+    if status.rl_mode:
+        lines.append(
+            f"RL     : {status.rl_mode} {status.rl_action} p={status.rl_prob:.2f}  "
+            f"steps={status.rl_steps}  buf={status.rl_buffer}"
+        )
+    elif status.rl_note:
+        note = status.rl_note if len(status.rl_note) <= 66 else status.rl_note[:63] + "..."
+        lines.append("RL     : " + note)
     if status.demo_step:
         lines.append("DEMO   : " + status.demo_step)
     if status.message:

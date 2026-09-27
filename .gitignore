@@ -11,6 +11,7 @@ logs/
 recordings/
 datasets/
 models/
+learning/
 
 # Editors / OS
 .vscode/

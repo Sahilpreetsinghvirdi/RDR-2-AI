@@ -164,6 +164,33 @@ code into the game, or interact with Red Dead Online.
   live behind pause menus that the gameplay HUD never shows; they are not
   guessed. Off by default (`survival.enabled: false`).
 
+### Phase 9 - learned policies (RL, best-effort research scaffold)
+- New `src/ai/rl/` package: record -> train offline -> act. The policy is a
+  tiny numpy MLP (one tanh hidden layer) over a fixed, versioned observation
+  vector built from `GameState` (`features.py`) - unknown fields are `0.0`
+  with a presence flag of `0.0`, never guessed. The action space is eight
+  *scripted skills* (`noop`, `forward`, `back`, `strafe_*`, `turn_*`,
+  `sprint`) executed through the Phase 4 locomotion planner, so the policy
+  never touches raw keys and keeps every focus/state guard.
+- Two modes (`rl.mode`): `policy` acts from a checkpoint - **inactive and
+  silent until `learning/policy.npz` loads** (missing/corrupt/mismatched
+  checkpoints log a reason instead of acting); `random` explores the skill
+  space to bootstrap `learning/buffer.npz`. Transitions record
+  (observation, action, reward) while acting, with episode boundaries at
+  `rl.boundary_gap_s` so Monte-Carlo returns do not bleed across sessions.
+- Training is offline and numpy-only: `python -m src.ai.rl.train --data
+  learning/buffer.npz --out learning/policy.npz` (REINFORCE with a mean
+  baseline by default, or `--method bc` for behavior cloning).
+- Rewards come from known deltas only (`rl.reward`: core changes minus a
+  threat-level penalty); an unknown core contributes nothing.
+- Wiring: the policy planner is the primary driver when `rl.enabled` (it
+  conflicts with `mission.enabled`/`control.enabled` by config validation),
+  yields to combat and survival, and shows an `RL` overlay line plus an
+  `rl` telemetry block. Buffer saves on shutdown (`rl_buffer` event).
+- Honest scope: this is a research scaffold, not a game-winning agent -
+  REINFORCE here is high-variance and there is no reward shaping for
+  objectives/missions yet. Off by default (`rl.enabled: false`).
+
 ## Architecture
 
 ```
@@ -213,13 +240,20 @@ src/
     respond.py         Phase 6 prompt responder (encounter -> key tap)
   ai/
     threat.py          Phase 7 threat assessor (damage window, level ladder)
-    rl/                reserved for later phases
+    rl/
+      features.py      Phase 9 fixed observation featurizer (presence flags)
+      actions.py       Phase 9 discrete action space (scripted skills)
+      policy.py        Phase 9 numpy MLP policy (act, save/load)
+      buffer.py        Phase 9 transition buffer (.npz, episode boundaries)
+      reward.py        Phase 9 reward from known state deltas only
+      train.py         Phase 9 offline trainer (REINFORCE / behavior cloning)
+      planner.py       Phase 9 policy driver (record while acting)
 tools/
   calibrate_capture.py measure capture fps/latency
   calibrate_hud.py     live HUD detection preview for region tuning
   inspect_frames.py    save sample frames for verification
   input_check.py       test keyboard/mouse injection
-tests/                 381 tests (pytest)
+tests/                 455 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -335,6 +369,7 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | `mission`   | task list (`turn`/`walk`/`wait`/`wait_for`/`interact`/`log`), `loop` restart |
 | `combat`    | self-defense on/off, engage thresholds, aim/fire/retreat clamps |
 | `survival`  | core-triggered remedies (key sequences, needs, cooldowns, hysteresis) |
+| `rl`        | learned-policy driver (mode, checkpoint/buffer paths, reward weights) |
 | `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators + minimap enemy blips, `dialogue` band/keywords/reactions, `ocr` engine/throttling |
 | `debug`     | dashboard window, `show_overlay`/`show_hud` boxes, panel width |
 | `recording` | fps, format, max frames, state jsonl |
@@ -383,7 +418,9 @@ synthetic backend ~24 fps, ~3 ms latency.
 8. **Phase 8 (done)** - survival systems: core-triggered provisioning
    macros (cooldown, hysteresis, threat gating); cash/crafting stay
    unknown - they are not visible on the gameplay HUD.
-9. **Phase 9** - learned/optimized policies (RL) on top of scripted skills.
+9. **Phase 9 (done)** - learned/optimized policies (RL) on top of scripted
+   skills: record -> train offline (numpy REINFORCE/BC) -> act from a
+   checkpoint; a best-effort research scaffold, off by default.
 10. **Phase 10** - robustness, long-run autonomy, packaging and docs.
 
 Each phase ships with tests and stays revertible: the safety layer and manual
@@ -411,7 +448,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 381 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 455 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 ```
 

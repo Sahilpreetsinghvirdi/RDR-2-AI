@@ -306,6 +306,40 @@ class SurvivalConfig:
 
 
 @dataclass
+class RewardConfig:
+    """Reward shaping for the RL scaffold (Phase 9).
+
+    Only *known* state deltas contribute; unknown cores never fabricate a
+    reward.
+    """
+
+    health: float = 1.0         # weight on health-core change per step
+    stamina: float = 0.5        # weight on stamina-core change per step
+    dead_eye: float = 0.5       # weight on dead-eye-core change per step
+    threat: float = 1.0         # per-step penalty x threat level (0..3)
+
+
+@dataclass
+class RlConfig:
+    """Learned policies (Phase 9): record -> train offline -> act (best-effort)."""
+
+    enabled: bool = False               # off = the scaffold only observes
+    mode: str = "policy"                # policy = act from checkpoint;
+                                        # random = explore to bootstrap data
+    checkpoint: str = "learning/policy.npz"   # trained policy weights
+    buffer: str = "learning/buffer.npz"       # recorded transitions
+    record: bool = True                 # append (obs, action, reward) while acting
+    explore: float = 0.1                # chance of a random action (0..1)
+    temperature: float = 1.0            # softmax sampling temperature (>0)
+    hidden: int = 16                    # MLP hidden units (must match checkpoint)
+    action_interval_s: float = 0.5      # minimum gap between chosen actions
+    boundary_gap_s: float = 3.0         # action gap longer than this = new episode
+    turn_step_deg: float = 15.0         # camera turn for turn_left/turn_right
+    step_s: float = 0.5                 # move burst for forward/back/strafe/sprint
+    reward: RewardConfig = field(default_factory=RewardConfig)
+
+
+@dataclass
 class DebugConfig:
     gui: bool = True
     window_name: str = "RDR2 AI - Debug"
@@ -349,6 +383,7 @@ class AppConfig:
     mission: MissionConfig = field(default_factory=MissionConfig)
     combat: CombatConfig = field(default_factory=CombatConfig)
     survival: SurvivalConfig = field(default_factory=SurvivalConfig)
+    rl: RlConfig = field(default_factory=RlConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
@@ -575,6 +610,45 @@ class AppConfig:
                         or not 0.0 <= threshold <= 1.0
                     ):
                         problems.append(f"{where}.needs[{core!r}] must be within 0..1")
+        rl = self.rl
+        if rl.mode not in {"policy", "random"}:
+            problems.append(f"rl.mode must be policy|random, got {rl.mode!r}")
+        if (
+            not isinstance(rl.explore, (int, float)) or isinstance(rl.explore, bool)
+            or not 0.0 <= rl.explore <= 1.0
+        ):
+            problems.append("rl.explore must be within 0..1")
+        if (
+            not isinstance(rl.temperature, (int, float))
+            or isinstance(rl.temperature, bool) or rl.temperature <= 0
+        ):
+            problems.append("rl.temperature must be > 0")
+        if not isinstance(rl.hidden, int) or isinstance(rl.hidden, bool) or rl.hidden < 1:
+            problems.append("rl.hidden must be an int >= 1")
+        for name in ("action_interval_s", "boundary_gap_s", "turn_step_deg",
+                     "step_s"):
+            value = getattr(rl, name)
+            if (
+                not isinstance(value, (int, float)) or isinstance(value, bool)
+                or value <= 0
+            ):
+                problems.append(f"rl.{name} must be > 0")
+        for name in ("checkpoint", "buffer"):
+            value = getattr(rl, name)
+            if not isinstance(value, str) or not value.strip():
+                problems.append(f"rl.{name} must be a non-empty path string")
+        for name in ("health", "stamina", "dead_eye", "threat"):
+            value = getattr(rl.reward, name)
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                problems.append(f"rl.reward.{name} must be a number")
+        if rl.enabled and mission.enabled:
+            problems.append(
+                "rl.enabled conflicts with mission.enabled (pick one primary driver)"
+            )
+        if rl.enabled and self.control.enabled:
+            problems.append(
+                "rl.enabled conflicts with control.enabled (pick one primary driver)"
+            )
         dlg = self.vision.dialogue
         region = dlg.region
         if (

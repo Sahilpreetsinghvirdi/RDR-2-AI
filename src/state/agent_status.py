@@ -58,6 +58,12 @@ class AgentStatus:
     threat_fire: bool = False
     survival_active: str = ""
     survival_low: str = ""
+    rl_mode: str = ""
+    rl_action: str = ""
+    rl_prob: float = 0.0
+    rl_steps: int = 0
+    rl_buffer: int = 0
+    rl_note: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
