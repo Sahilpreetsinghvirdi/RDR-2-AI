@@ -273,6 +273,39 @@ class CombatConfig:
 
 
 @dataclass
+class RemedyConfig:
+    """One survival action: a key sequence run when any tracked core is low."""
+
+    keys: list[str] = field(default_factory=list)  # raw key names ("i", "down")
+    hold_ms: int | None = None           # hold each key this long (None = tap)
+    gap_s: float = 0.5                   # pause between keys of the sequence
+    cooldown_s: float = 45.0             # min time between completed runs
+    needs: dict[str, float] = field(default_factory=dict)  # core -> low threshold
+
+
+@dataclass
+class SurvivalConfig:
+    """Survival systems (Phase 8): core-triggered provisioning macros."""
+
+    enabled: bool = False                # off = cores are only observed
+    require_clear: bool = True           # never act while a threat is active
+    recover_margin: float = 0.15         # cores must recover this far above
+                                         # their threshold before re-arming
+    remedies: dict[str, RemedyConfig] = field(
+        default_factory=lambda: {
+            "eat": RemedyConfig(
+                keys=["i"],              # open satchel; extend to your binds
+                needs={
+                    "health": 0.4,
+                    "stamina": 0.4,
+                    "dead_eye": 0.4,
+                },
+            )
+        }
+    )
+
+
+@dataclass
 class DebugConfig:
     gui: bool = True
     window_name: str = "RDR2 AI - Debug"
@@ -315,6 +348,7 @@ class AppConfig:
     control: ControlConfig = field(default_factory=ControlConfig)
     mission: MissionConfig = field(default_factory=MissionConfig)
     combat: CombatConfig = field(default_factory=CombatConfig)
+    survival: SurvivalConfig = field(default_factory=SurvivalConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
@@ -483,6 +517,64 @@ class AppConfig:
             problems.append(
                 f"combat.fire_button must be a mouse button name, got {combat.fire_button!r}"
             )
+        surv = self.survival
+        _normalize_remedies(surv, problems)
+        if not isinstance(surv.remedies, dict):
+            problems.append("survival.remedies must map remedy name -> settings")
+        elif surv.enabled and not surv.remedies:
+            problems.append("survival.enabled requires at least one survival.remedies entry")
+        if (
+            not isinstance(surv.recover_margin, (int, float))
+            or isinstance(surv.recover_margin, bool)
+            or not 0.0 <= surv.recover_margin <= 1.0
+        ):
+            problems.append("survival.recover_margin must be within 0..1")
+        valid_cores = ("health", "stamina", "dead_eye")
+        for name, remedy in surv.remedies.items() if isinstance(surv.remedies, dict) else []:
+            where = f"survival.remedies[{name!r}]"
+            if not isinstance(name, str) or not name.strip():
+                problems.append("survival.remedies names must be non-empty strings")
+                continue
+            if not isinstance(remedy, RemedyConfig):
+                problems.append(f"{where} must be a mapping of remedy settings")
+                continue
+            if not isinstance(remedy.keys, list) or not remedy.keys:
+                problems.append(f"{where}.keys must be a non-empty list")
+            elif any(not isinstance(k, str) or not k.strip() for k in remedy.keys):
+                problems.append(f"{where}.keys must be non-empty strings")
+            else:
+                from src.input.keys import normalize_key  # lazy: import-light config
+
+                for key in remedy.keys:
+                    try:
+                        normalize_key(key)
+                    except ValueError:
+                        problems.append(f"{where}.keys contains unknown key {key!r}")
+                        break
+            if remedy.hold_ms is not None and (
+                not isinstance(remedy.hold_ms, int) or isinstance(remedy.hold_ms, bool)
+                or remedy.hold_ms < 0
+            ):
+                problems.append(f"{where}.hold_ms must be an int >= 0 or null")
+            if not isinstance(remedy.gap_s, (int, float)) or remedy.gap_s <= 0:
+                problems.append(f"{where}.gap_s must be > 0")
+            if not isinstance(remedy.cooldown_s, (int, float)) or remedy.cooldown_s <= 0:
+                problems.append(f"{where}.cooldown_s must be > 0")
+            if not isinstance(remedy.needs, dict) or not remedy.needs:
+                problems.append(f"{where}.needs must map a core name to a threshold")
+            else:
+                for core, threshold in remedy.needs.items():
+                    if core not in valid_cores:
+                        problems.append(
+                            f"{where}.needs unknown core {core!r} "
+                            f"(health|stamina|dead_eye)"
+                        )
+                    elif (
+                        not isinstance(threshold, (int, float))
+                        or isinstance(threshold, bool)
+                        or not 0.0 <= threshold <= 1.0
+                    ):
+                        problems.append(f"{where}.needs[{core!r}] must be within 0..1")
         dlg = self.vision.dialogue
         region = dlg.region
         if (
@@ -570,6 +662,31 @@ def _build(cls: type, data: dict[str, Any], warnings: list[str]) -> Any:
         else:
             kwargs[name] = value
     return cls(**kwargs)
+
+
+def _normalize_remedies(surv: SurvivalConfig, problems: list[str]) -> None:
+    """Convert plain-dict remedies (from YAML merge) into RemedyConfig objects."""
+    if not isinstance(surv.remedies, dict):
+        return
+    fixed: dict[str, Any] = {}
+    for name, value in surv.remedies.items():
+        if value is None:
+            continue  # `remedy: null` removes a default remedy
+        if isinstance(value, RemedyConfig):
+            fixed[name] = value
+        elif isinstance(value, dict):
+            known = set(RemedyConfig.__dataclass_fields__)
+            unknown = sorted(set(value) - known)
+            if unknown:
+                problems.append(
+                    f"survival.remedies[{name!r}] unknown settings: {unknown}"
+                )
+                fixed[name] = value
+            else:
+                fixed[name] = RemedyConfig(**value)
+        else:
+            fixed[name] = value
+    surv.remedies = fixed
 
 
 def _check_regions(regions: Any, where: str, problems: list[str]) -> None:

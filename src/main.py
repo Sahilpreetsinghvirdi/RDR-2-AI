@@ -32,6 +32,7 @@ from src.mission.runner import MissionRunner
 from src.planning.combat import CombatPlanner
 from src.planning.route import RoutePlanner
 from src.planning.scripted import ScriptedPlanner
+from src.planning.survival import SurvivalPlanner, survival_summary
 from src.safety.emergency_stop import EmergencyStop
 from src.safety.state_machine import AgentState, StateMachine
 from src.safety.watchdog import HeartbeatRegistry, Watchdog
@@ -163,6 +164,13 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
     if cfg.combat.enabled:
         combat = CombatPlanner(cfg.combat, locomotion, input_ctrl)
         log.info("combat enabled - self-defense armed (engage on wanted/enemies/fire)")
+    survival: SurvivalPlanner | None = None
+    if cfg.survival.enabled:
+        survival = SurvivalPlanner(cfg.survival, input_ctrl, locomotion)
+        log.info(
+            "survival enabled - %d remedies armed",
+            len(cfg.survival.remedies),
+        )
 
     events_path = cfg.resolve(cfg.telemetry.dir) / cfg.telemetry.events_file
     events = EventLog(events_path if cfg.telemetry.file else None)
@@ -237,7 +245,7 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         rc = _agent_loop(
             cfg, args, machine, heartbeats, wm, capture, fast, perception,
             game_state, status, input_ctrl, recorder, events, demo, started,
-            locomotion, planner, responder, assessor, combat,
+            locomotion, planner, responder, assessor, combat, survival,
         )
     except KeyboardInterrupt:
         log.warning("interrupted by user (Ctrl+C)")
@@ -332,6 +340,7 @@ def _agent_loop(
     responder: PromptResponder | None = None,
     assessor: ThreatAssessor | None = None,
     combat: CombatPlanner | None = None,
+    survival: SurvivalPlanner | None = None,
 ) -> int:
     period = 1.0 / max(1.0, cfg.agent.loop_hz)
     hz = 0.0
@@ -381,7 +390,7 @@ def _agent_loop(
             last_pres = _run_active_work(
                 cfg, capture, fast, perception, game_state, packet, info, status,
                 input_ctrl, recorder, demo, events, locomotion, planner, responder,
-                assessor, combat,
+                assessor, combat, survival,
             )
         else:
             locomotion.stop()
@@ -429,6 +438,7 @@ def _agent_loop(
                 world=world_summary(last_pres) if last_pres is not None else None,
                 dialogue=dialogue_summary(last_pres) if last_pres is not None else None,
                 threat=threat_summary(game_state),
+                survival=survival_summary(game_state),
             )
             log.debug(
                 "metrics: %.1f Hz, capture %.1f fps (%.1f ms), vision %.1f ms, input %s",
@@ -459,6 +469,7 @@ def _run_active_work(
     responder: PromptResponder | None = None,
     assessor: ThreatAssessor | None = None,
     combat: CombatPlanner | None = None,
+    survival: SurvivalPlanner | None = None,
 ) -> PerceptionResult | None:
     if info is None:
         locomotion.stop()
@@ -538,6 +549,8 @@ def _run_active_work(
         threat_enemies=game_state.threat.enemies_detected,
         threat_wanted=game_state.threat.wanted_level,
         threat_fire=game_state.threat.incoming_fire,
+        survival_active=game_state.survival.active_remedy or "",
+        survival_low=",".join(game_state.survival.low_cores),
         goal=(
             f"IDLE (phase {cfg.agent.phase})"
             if demo is None or not demo.active else "VERIFY_INPUT"
@@ -551,13 +564,18 @@ def _run_active_work(
         events.emit("prompt", text=pres.prompt_text)
 
     engaged = False
+    survival_busy = False
     if demo is not None and demo.active:
         demo.step(status)
     else:
         if combat is not None:
             combat.step(time.monotonic(), status, packet.image, game_state)
             engaged = combat.engaged
-        if not engaged:
+        if survival is not None:
+            survival_busy = survival.step(
+                time.monotonic(), status, packet.image, game_state
+            )
+        if not engaged and not survival_busy:
             if planner is not None:
                 planner.step(time.monotonic(), status, packet.image, game_state)
             elif demo is not None:

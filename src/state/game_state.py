@@ -86,6 +86,25 @@ class DialogueState:
 
 
 @dataclass
+class SurvivalState:
+    """Core-triggered provisioning status (Phase 8).
+
+    ``low_cores`` is filled only while ``survival.enabled`` is on; empty means
+    "not evaluated", never "all cores fine".
+    """
+
+    active_remedy: str | None = None
+    low_cores: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EconomyState:
+    """Cash/valuation. The gameplay HUD does not show it: stays unknown."""
+
+    cash: float | None = None
+
+
+@dataclass
 class Confidence:
     overall: float = 0.0
     player: float = 0.0
@@ -107,6 +126,8 @@ class GameState:
     mission: MissionState = field(default_factory=MissionState)
     threat: ThreatState = field(default_factory=ThreatState)
     dialogue: DialogueState = field(default_factory=DialogueState)
+    survival: SurvivalState = field(default_factory=SurvivalState)
+    economy: EconomyState = field(default_factory=EconomyState)
     nearby_entities: list[EntityDetection] = field(default_factory=list)
     confidence: Confidence = field(default_factory=Confidence)
     frame_id: int | None = None

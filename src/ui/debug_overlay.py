@@ -84,6 +84,10 @@ def build_lines(status: AgentStatus) -> list[str]:
             f"THREAT : {status.threat_level}  enemies {enemies}  "
             f"wanted {status.threat_wanted}  {fire}"
         )
+    if status.survival_active or status.survival_low:
+        active = status.survival_active or "-"
+        low = status.survival_low or "-"
+        lines.append(f"SURV   : remedy {active}  low cores {low}")
     if status.demo_step:
         lines.append("DEMO   : " + status.demo_step)
     if status.message:

@@ -56,6 +56,8 @@ class AgentStatus:
     threat_enemies: int | None = None
     threat_wanted: int = 0
     threat_fire: bool = False
+    survival_active: str = ""
+    survival_low: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

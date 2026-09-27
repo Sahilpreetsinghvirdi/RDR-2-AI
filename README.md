@@ -146,6 +146,24 @@ code into the game, or interact with Red Dead Online.
   still passes the focus/state guard, and pause/takeover/lost focus/window
   loss all release the fire button. Off by default.
 
+### Phase 8 - survival systems (provisioning)
+- New `src/planning/survival.py`: `SurvivalPlanner` watches the HUD-derived
+  cores and runs a remedy's key sequence when any tracked core drops below
+  its threshold (`needs: {health: 0.4, ...}` = any-of). Sequences are raw
+  key names (`keys: [i, ...]`) tuned to *your* provisioning binds - nothing
+  about the in-game menus is assumed or hardcoded.
+- Discipline: each remedy has a `cooldown_s`, must re-arm only after every
+  known core recovers past threshold + `recover_margin` (hysteresis), and
+  with `require_clear: true` nothing starts or continues while a threat is
+  active (mid-sequence threats abort the run). A refused key press retries
+  the step instead of skipping it.
+- State: `GameState.survival` (`active_remedy`, `low_cores`) with a
+  `SURV` overlay line and `survival` telemetry block; while a remedy runs it
+  is the primary planner (navigation pauses for those ticks).
+- Honest gaps: `GameState.economy.cash` stays `None` - cash and crafting
+  live behind pause menus that the gameplay HUD never shows; they are not
+  guessed. Off by default (`survival.enabled: false`).
+
 ## Architecture
 
 ```
@@ -188,6 +206,7 @@ src/
     scripted.py        Phase 4 scripted autopilot (look/walk cycle)
     route.py           Phase 4 route navigation (bearing/distance legs)
     combat.py          Phase 7 self-defense planner (aim/fire/retreat)
+    survival.py        Phase 8 core-triggered provisioning macros
   mission/
     tasks.py           Phase 5 task model + config parser
     runner.py          Phase 5 mission executor (MISSION n/N status)
@@ -200,7 +219,7 @@ tools/
   calibrate_hud.py     live HUD detection preview for region tuning
   inspect_frames.py    save sample frames for verification
   input_check.py       test keyboard/mouse injection
-tests/                 351 tests (pytest)
+tests/                 381 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -315,6 +334,7 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | `control`   | autopilot on/off, `mode` (script/route), movement keys, look sensitivity, `nav` legs/gains/stalls |
 | `mission`   | task list (`turn`/`walk`/`wait`/`wait_for`/`interact`/`log`), `loop` restart |
 | `combat`    | self-defense on/off, engage thresholds, aim/fire/retreat clamps |
+| `survival`  | core-triggered remedies (key sequences, needs, cooldowns, hysteresis) |
 | `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators + minimap enemy blips, `dialogue` band/keywords/reactions, `ocr` engine/throttling |
 | `debug`     | dashboard window, `show_overlay`/`show_hud` boxes, panel width |
 | `recording` | fps, format, max frames, state jsonl |
@@ -360,7 +380,9 @@ synthetic backend ~24 fps, ~3 ms latency.
 7. **Phase 7 (done)** - combat and self-defense behaviors: minimap enemy
    blips, damage-window threat assessment, and an engage/aim/fire/retreat
    planner that is off by default.
-8. **Phase 8** - survival systems (food, camp, crafting, economy).
+8. **Phase 8 (done)** - survival systems: core-triggered provisioning
+   macros (cooldown, hysteresis, threat gating); cash/crafting stay
+   unknown - they are not visible on the gameplay HUD.
 9. **Phase 9** - learned/optimized policies (RL) on top of scripted skills.
 10. **Phase 10** - robustness, long-run autonomy, packaging and docs.
 
@@ -389,7 +411,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 351 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 381 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 ```
 

@@ -3,7 +3,7 @@
 
 agent:
   name: rdr2-ai
-  phase: 7
+  phase: 8
   loop_hz: 10.0          # main decision-loop rate
 
 window:
@@ -115,6 +115,23 @@ combat:
   retreat_health_frac: 0.25    # at/below this health: back off instead of firing
   retreat_step_s: 0.5          # backward burst length while retreating
   disengage_clear_s: 1.5       # threat clear this long before standing down
+
+survival:
+  enabled: false               # eat/drink when cores drop (observe only when off)
+  require_clear: true          # never start or continue a remedy under threat
+  recover_margin: 0.15         # cores must recover this far above the
+                               # threshold before the remedy re-arms
+  remedies:                    # each runs keys[] in order when any need is low
+    eat:
+      keys: [i]                # raw key names; tune to your provisioning binds
+      hold_ms: null            # hold each key this long (null = quick tap)
+      gap_s: 0.5               # pause between keys of the sequence
+      cooldown_s: 45.0         # min seconds between completed runs
+      needs:                   # core -> low threshold (any match triggers)
+        health: 0.4
+        stamina: 0.4
+        dead_eye: 0.4
+    # Add more remedies (e.g. `heal`, `drink`), or set `eat: null` to remove.
 
 vision:
   fast:
