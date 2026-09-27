@@ -66,6 +66,9 @@ def check_tesseract() -> CheckResult:
     try:
         import pytesseract
 
+        from src.vision.ocr import ensure_tesseract
+
+        ensure_tesseract(pytesseract)
         version = str(pytesseract.get_tesseract_version())
         return CheckResult("tesseract", "pass", version)
     except Exception as exc:

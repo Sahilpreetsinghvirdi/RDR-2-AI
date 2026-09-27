@@ -55,7 +55,8 @@ safety:
   takeover_key: F10          # human takeover / return control to AI
   hotkey_poll_hz: 250        # independent high-rate hotkey thread
   watchdog_interval_s: 0.1
-  heartbeat_stall_s: 2.0     # a critical loop silent this long => fault + release inputs
+  heartbeat_stall_s: 8.0     # a critical loop silent this long => fault + release inputs
+                             # (8s tolerates game-load hitches; still failsafe)
   startup_grace_s: 10.0      # no stall faults during startup
   release_on_pause: true
 

@@ -9,12 +9,51 @@ loop.
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 from src.config import OcrConfig
 
 log = logging.getLogger(__name__)
+
+
+def _tesseract_candidates() -> list[Path]:
+    """Standard Windows install locations for tesseract.exe."""
+    candidates: list[Path] = []
+    program_files = os.environ.get("ProgramFiles")
+    if program_files:
+        candidates.append(Path(program_files) / "Tesseract-OCR" / "tesseract.exe")
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        candidates.append(
+            Path(local) / "Programs" / "Tesseract-OCR" / "tesseract.exe"
+        )
+    x86 = os.environ.get("ProgramFiles(x86)")
+    if x86:
+        candidates.append(Path(x86) / "Tesseract-OCR" / "tesseract.exe")
+    return candidates
+
+
+def ensure_tesseract(pytesseract: Any) -> None:
+    """Point pytesseract at the binary: PATH first, then standard installs.
+
+    Raises when no working binary exists so callers can degrade gracefully.
+    """
+    try:
+        pytesseract.get_tesseract_version()
+        return
+    except Exception:
+        pass
+    for candidate in _tesseract_candidates():
+        if candidate.is_file():
+            pytesseract.pytesseract.tesseract_cmd = str(candidate)
+            log.info("ocr: using tesseract at %s", candidate)
+            pytesseract.get_tesseract_version()
+            return
+    pytesseract.get_tesseract_version()
 
 
 class OcrEngine:
@@ -41,7 +80,7 @@ class TesseractOcr(OcrEngine):
     def __init__(self, cfg: OcrConfig) -> None:
         import pytesseract  # noqa: PLC0415 - lazy: only when the engine is wanted
 
-        pytesseract.get_tesseract_version()
+        ensure_tesseract(pytesseract)
         self._pt = pytesseract
         self._cfg = cfg
         self.name = "tesseract"
