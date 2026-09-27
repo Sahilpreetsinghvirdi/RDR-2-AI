@@ -35,6 +35,7 @@ from src.planning.route import RoutePlanner
 from src.planning.scripted import ScriptedPlanner
 from src.planning.survival import SurvivalPlanner, survival_summary
 from src.safety.emergency_stop import EmergencyStop
+from src.safety.resilience import ComponentGuard
 from src.safety.state_machine import AgentState, StateMachine
 from src.safety.watchdog import HeartbeatRegistry, Watchdog
 from src.state.agent_status import StatusTracker
@@ -190,6 +191,9 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
 
     events_path = cfg.resolve(cfg.telemetry.dir) / cfg.telemetry.events_file
     events = EventLog(events_path if cfg.telemetry.file else None)
+    guard = ComponentGuard(
+        on_fault=_make_fault_handler(events, status, input_ctrl)
+    )
 
     emergency = EmergencyStop(
         cfg.safety,
@@ -262,7 +266,7 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             cfg, args, machine, heartbeats, wm, capture, fast, perception,
             game_state, status, input_ctrl, recorder, events, demo, started,
             locomotion, planner, responder, assessor, combat, survival,
-            policy_planner,
+            policy_planner, guard,
         )
     except KeyboardInterrupt:
         log.warning("interrupted by user (Ctrl+C)")
@@ -308,6 +312,21 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             input_ctrl.stats.refused, input_ctrl.stats.released, events.count,
         )
     return rc
+
+
+def _make_fault_handler(
+    events: EventLog, status: StatusTracker, input_ctrl: InputController
+) -> Callable[[str, BaseException], None]:
+    def handler(name: str, exc: BaseException) -> None:
+        input_ctrl.release_all()
+        events.emit("component_fault", component=name,
+                    error=f"{type(exc).__name__}: {exc}")
+        status.update(
+            error=f"{name}: {type(exc).__name__}",
+            message=f"{name} failed - observing without it",
+        )
+
+    return handler
 
 
 def _on_mode_change(events: EventLog, status: StatusTracker, mode: str, active: bool) -> None:
@@ -363,7 +382,10 @@ def _agent_loop(
     combat: CombatPlanner | None = None,
     survival: SurvivalPlanner | None = None,
     policy_planner: PolicyPlanner | None = None,
+    guard: ComponentGuard | None = None,
 ) -> int:
+    if guard is None:
+        guard = ComponentGuard()
     period = 1.0 / max(1.0, cfg.agent.loop_hz)
     hz = 0.0
     window_seen = False
@@ -412,7 +434,7 @@ def _agent_loop(
             last_pres = _run_active_work(
                 cfg, capture, fast, perception, game_state, packet, info, status,
                 input_ctrl, recorder, demo, events, locomotion, planner, responder,
-                assessor, combat, survival, policy_planner,
+                assessor, combat, survival, policy_planner, guard,
             )
         else:
             locomotion.stop()
@@ -462,6 +484,7 @@ def _agent_loop(
                 threat=threat_summary(game_state),
                 survival=survival_summary(game_state),
                 rl=rl_summary(policy_planner),
+                guard=guard.summary(),
             )
             log.debug(
                 "metrics: %.1f Hz, capture %.1f fps (%.1f ms), vision %.1f ms, input %s",
@@ -494,7 +517,10 @@ def _run_active_work(
     combat: CombatPlanner | None = None,
     survival: SurvivalPlanner | None = None,
     policy_planner: PolicyPlanner | None = None,
+    guard: ComponentGuard | None = None,
 ) -> PerceptionResult | None:
+    if guard is None:
+        guard = ComponentGuard()
     if info is None:
         locomotion.stop()
         if combat is not None:
@@ -531,7 +557,7 @@ def _run_active_work(
     pres = perception.process(packet.image, packet.frame_id)
     perception.apply_to_state(game_state, pres)
     if assessor is not None:
-        assessor.assess(time.monotonic(), game_state)
+        guard.call("threat", assessor.assess, time.monotonic(), game_state)
     boxes, labels = (
         perception.overlay_boxes(pres) if cfg.debug.show_hud else ([], [])
     )
@@ -590,28 +616,31 @@ def _run_active_work(
     engaged = False
     survival_busy = False
     if demo is not None and demo.active:
-        demo.step(status)
+        guard.call("demo", demo.step, status)
     else:
         if combat is not None:
-            combat.step(time.monotonic(), status, packet.image, game_state)
-            engaged = combat.engaged
+            guard.call("combat", combat.step, time.monotonic(), status,
+                       packet.image, game_state)
+            engaged = combat.engaged if not guard.is_disabled("combat") else False
         if survival is not None:
-            survival_busy = survival.step(
-                time.monotonic(), status, packet.image, game_state
+            survival_busy = bool(
+                guard.call("survival", survival.step, time.monotonic(), status,
+                           packet.image, game_state)
             )
         if not engaged and not survival_busy:
             if planner is not None:
-                planner.step(time.monotonic(), status, packet.image, game_state)
+                guard.call("planner", planner.step, time.monotonic(), status,
+                           packet.image, game_state)
             elif policy_planner is not None:
-                policy_planner.step(
-                    time.monotonic(), status, packet.image, game_state
-                )
+                guard.call("policy", policy_planner.step, time.monotonic(),
+                           status, packet.image, game_state)
             elif demo is not None:
                 status.update(
                     goal=f"IDLE (phase {cfg.agent.phase})", action="none"
                 )
         if responder is not None:
-            responder.step(time.monotonic(), status, game_state)
+            guard.call("responder", responder.step, time.monotonic(), status,
+                       game_state)
 
     if recorder is not None:
         recorder.record(packet, status.to_dict())

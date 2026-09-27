@@ -325,6 +325,25 @@ class TestBuffer:
         with pytest.raises(ValueError):
             TransitionBuffer.load(bad)
 
+    def test_max_rows_drops_oldest_and_promotes_boundary(self) -> None:
+        buf = TransitionBuffer(max_rows=3)
+        for i in range(5):
+            buf.add(np.full(4, float(i)), 0, float(i),
+                    boundary=(i == 0))
+        assert len(buf) == 3
+        _, _, rewards = buf.as_arrays()
+        assert rewards.tolist() == [2.0, 3.0, 4.0]
+        flags = buf.boundary_flags().tolist()
+        assert flags[0] is True
+
+    def test_max_rows_stores_oldest_within_cap(self) -> None:
+        buf = TransitionBuffer(max_rows=10)
+        for i in range(4):
+            buf.add(np.full(4, float(i)), 1, 0.0)
+        assert len(buf) == 4
+        obs, _, _ = buf.as_arrays()
+        assert obs[0][0] == 0.0
+
 
 class TestReward:
     def test_threat_values(self) -> None:
@@ -490,7 +509,7 @@ class TestPolicyPlanner:
         snap = status.snapshot()
         assert snap.rl_mode == "random"
         assert snap.rl_action in ACTIONS
-        assert snap.goal == "RL POLICY (phase 9)"
+        assert snap.goal == "RL POLICY"
         assert snap.action.startswith("rl:")
 
     def test_action_interval_gates(self, tmp_path: Path) -> None:
@@ -559,6 +578,16 @@ class TestPolicyPlanner:
         planner, _ = make_planner(tmp_path, mode="random")
         assert planner.close() is None
 
+    def test_buffer_max_bounds_planner_buffer(self, tmp_path: Path) -> None:
+        planner, _ = make_planner(tmp_path, mode="random",
+                                  action_interval_s=0.0, buffer_max=5)
+        status = StatusTracker(9)
+        for i in range(9):
+            planner.step(100.0 + i, status, None, GameState())
+        assert planner.buffer_len == 5
+        _, _, rewards = planner._buffer.as_arrays()
+        assert rewards.shape == (5,)
+
     def test_summary_helpers(self, tmp_path: Path) -> None:
         assert rl_summary(None) is None
         planner, _ = make_planner(tmp_path, mode="random")
@@ -584,6 +613,9 @@ class TestRlConfig:
             (lambda c: setattr(c.rl, "explore", -0.1), "rl.explore"),
             (lambda c: setattr(c.rl, "temperature", 0.0), "rl.temperature"),
             (lambda c: setattr(c.rl, "hidden", 0), "rl.hidden"),
+            (lambda c: setattr(c.rl, "buffer_max", 0), "rl.buffer_max"),
+            (lambda c: setattr(c.rl, "buffer_max", 50), "rl.buffer_max"),
+            (lambda c: setattr(c.rl, "buffer_max", "many"), "rl.buffer_max"),
             (lambda c: setattr(c.rl, "action_interval_s", 0.0),
              "rl.action_interval_s"),
             (lambda c: setattr(c.rl, "boundary_gap_s", -1.0),
@@ -619,6 +651,7 @@ class TestRlConfig:
         assert app_config.rl.enabled is False
         assert app_config.rl.mode == "policy"
         assert app_config.rl.hidden == 16
+        assert app_config.rl.buffer_max == 20000
         assert app_config.rl.reward.health == 1.0
 
     def test_rl_disabled_by_cli_only(self) -> None:

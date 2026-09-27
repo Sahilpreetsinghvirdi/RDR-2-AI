@@ -329,6 +329,7 @@ class RlConfig:
     checkpoint: str = "learning/policy.npz"   # trained policy weights
     buffer: str = "learning/buffer.npz"       # recorded transitions
     record: bool = True                 # append (obs, action, reward) while acting
+    buffer_max: int = 20000             # cap recorded rows (oldest dropped)
     explore: float = 0.1                # chance of a random action (0..1)
     temperature: float = 1.0            # softmax sampling temperature (>0)
     hidden: int = 16                    # MLP hidden units (must match checkpoint)
@@ -625,6 +626,11 @@ class AppConfig:
             problems.append("rl.temperature must be > 0")
         if not isinstance(rl.hidden, int) or isinstance(rl.hidden, bool) or rl.hidden < 1:
             problems.append("rl.hidden must be an int >= 1")
+        if (
+            not isinstance(rl.buffer_max, int) or isinstance(rl.buffer_max, bool)
+            or rl.buffer_max < 100
+        ):
+            problems.append("rl.buffer_max must be an int >= 100")
         for name in ("action_interval_s", "boundary_gap_s", "turn_step_deg",
                      "step_s"):
             value = getattr(rl, name)

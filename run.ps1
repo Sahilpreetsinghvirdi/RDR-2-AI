@@ -5,6 +5,7 @@
 #   .\run.ps1 -Autopilot
 #   .\run.ps1 -Headless -Record
 #   .\run.ps1 -Backend mss -ExtraArgs @("--duration","30")
+#   .\run.ps1 -Doctor
 
 param(
     [switch]$Demo,
@@ -12,6 +13,7 @@ param(
     [switch]$Mission,
     [switch]$Headless,
     [switch]$Record,
+    [switch]$Doctor,
     [string]$Config = "",
     [string]$Backend = "",
     [string[]]$ExtraArgs = @()
@@ -27,18 +29,25 @@ if (-not (Test-Path $venvPython)) {
     exit 1
 }
 
-$argsList = @("-m", "src.main")
-if ($Config -ne "") { $argsList += @("--config", $Config) }
-if ($Backend -ne "") { $argsList += @("--backend", $Backend) }
-if ($Demo) { $argsList += "--demo" }
-if ($Autopilot) { $argsList += "--autopilot" }
-if ($Mission) { $argsList += "--mission" }
-if ($Headless) { $argsList += "--headless" }
-if ($Record) { $argsList += "--record" }
-if ($ExtraArgs.Count -gt 0) { $argsList += $ExtraArgs }
+if ($Doctor) {
+    $argsList = @("-m", "src.doctor")
+    if ($Config -ne "") { $argsList += @("--config", $Config) }
+} else {
+    $argsList = @("-m", "src.main")
+    if ($Config -ne "") { $argsList += @("--config", $Config) }
+    if ($Backend -ne "") { $argsList += @("--backend", $Backend) }
+    if ($Demo) { $argsList += "--demo" }
+    if ($Autopilot) { $argsList += "--autopilot" }
+    if ($Mission) { $argsList += "--mission" }
+    if ($Headless) { $argsList += "--headless" }
+    if ($Record) { $argsList += "--record" }
+    if ($ExtraArgs.Count -gt 0) { $argsList += $ExtraArgs }
+}
 
 Write-Host "Starting RDR2 AI: python $($argsList -join ' ')" -ForegroundColor Cyan
-Write-Host "Emergency stop: F12 | Pause: F11 | Human takeover: F10" -ForegroundColor Yellow
+if (-not $Doctor) {
+    Write-Host "Emergency stop: F12 | Pause: F11 | Human takeover: F10" -ForegroundColor Yellow
+}
 
 & $venvPython $argsList
 exit $LASTEXITCODE

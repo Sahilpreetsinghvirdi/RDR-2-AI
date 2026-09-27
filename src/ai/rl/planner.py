@@ -67,7 +67,9 @@ class PolicyPlanner:
         self._buffer_path = Path(buffer_path)
         self._policy: Policy | None = None
         self._reason = ""
-        self._buffer = TransitionBuffer() if cfg.record else None
+        self._buffer = (
+            TransitionBuffer(max_rows=cfg.buffer_max) if cfg.record else None
+        )
         self._rng = np.random.default_rng()
         self._last: tuple[np.ndarray, int, bool] | None = None
         self._prev: GameState | None = None
@@ -188,7 +190,7 @@ class PolicyPlanner:
         self._next_at = now + self._cfg.action_interval_s
         self._steps += 1
         status.update(
-            goal="RL POLICY (phase 9)",
+            goal="RL POLICY",
             action=f"rl:{ACTIONS[index]}",
             rl_mode=self._cfg.mode,
             rl_action=ACTIONS[index],

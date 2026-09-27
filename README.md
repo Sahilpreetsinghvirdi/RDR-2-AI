@@ -191,11 +191,40 @@ code into the game, or interact with Red Dead Online.
   REINFORCE here is high-variance and there is no reward shaping for
   objectives/missions yet. Off by default (`rl.enabled: false`).
 
+### Phase 10 - robustness, long-run autonomy, packaging and docs
+- `ComponentGuard` (`src/safety/resilience.py`): any stepping component
+  (planner, mission runner, responder, assessor, combat, survival, demo,
+  RL policy) that throws is **disabled for the session** - inputs are
+  released immediately, a `component_fault` event is emitted, the status
+  line shows the error, and the loop keeps running observation-only
+  instead of crashing. Disabled components appear under `guard` in
+  metrics. Perception failures still propagate (never act on broken
+  vision).
+- `.\run.ps1 -Doctor` / `python -m src.doctor`: environment self-check
+  with PASS/WARN/FAIL rows - interpreter, imports, Tesseract, config
+  validity (warnings included), log writability, game-window presence,
+  key map sanity. Exits 1 only on FAIL; run it before any hands-on test.
+- Long-run memory bounds: `rl.buffer_max` caps recorded transitions
+  (oldest row dropped, episode boundary promoted), so multi-hour sessions
+  cannot grow the RL buffer without limit.
+- Packaging polish: `pytesseract` declared in `pyproject.toml`,
+  version bumped to 0.2.0, `-Doctor` switch in `run.ps1`.
+- Hands-on verification checklist (performed after all phases):
+  1. `.\run.ps1 -Doctor` - all rows PASS or WARN.
+  2. `.\.venv\Scripts\python.exe tools\input_check.py` - keys/mouse land
+     where you expect (test window focused, not the game).
+  3. `.\run.ps1 -Demo` with the game focused - observe the short input
+     demo, F12 must kill it instantly.
+  4. `.\run.ps1 -Autopilot -ExtraArgs @("--duration","30")` - scripted
+     look/walk cycle with the HUD visible.
+  5. Only then try mission/responder/combat/survival flags one at a time.
+
 ## Architecture
 
 ```
 src/
   main.py              entry point: thread wiring, main decision loop
+  doctor.py            self-check CLI (run with -Doctor before testing)
   config.py            typed config dataclasses loaded from config.yaml
   capture/
     window_manager.py  find/track/focus the game window (Win32)
@@ -210,6 +239,7 @@ src/
   safety/
     state_machine.py   INIT/RUNNING/PAUSED/TAKEOVER/STOPPED/ERROR
     emergency_stop.py  global hotkey listener thread
+    resilience.py      ComponentGuard: fault isolation for long runs
     watchdog.py        heartbeats + stall faults
   state/
     game_state.py      GameState / AgentStatus data models
@@ -253,7 +283,7 @@ tools/
   calibrate_hud.py     live HUD detection preview for region tuning
   inspect_frames.py    save sample frames for verification
   input_check.py       test keyboard/mouse injection
-tests/                 455 tests (pytest)
+tests/                 474 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -312,6 +342,7 @@ HUD elements (leave a small margin around each core).
 ## Running
 
 ```powershell
+.\run.ps1 -Doctor                # environment self-check first
 .\run.ps1                     # normal run (debug window on)
 .\run.ps1 -Demo               # Phase 1 input demonstration
 .\run.ps1 -Headless -Record   # no debug window, record frames
@@ -421,7 +452,10 @@ synthetic backend ~24 fps, ~3 ms latency.
 9. **Phase 9 (done)** - learned/optimized policies (RL) on top of scripted
    skills: record -> train offline (numpy REINFORCE/BC) -> act from a
    checkpoint; a best-effort research scaffold, off by default.
-10. **Phase 10** - robustness, long-run autonomy, packaging and docs.
+10. **Phase 10 (done)** - robustness, long-run autonomy, packaging and
+    docs: `ComponentGuard` fault isolation (a crashing component is
+    disabled, inputs released, loop continues), `src.doctor` self-check,
+    `rl.buffer_max` memory cap, packaging/version polish.
 
 Each phase ships with tests and stays revertible: the safety layer and manual
 hotkeys are never bypassed by later phases.
@@ -430,6 +464,7 @@ hotkeys are never bypassed by later phases.
 
 | Symptom | Fix |
 |---------|-----|
+| Anything unexpected at startup | Run `.\run.ps1 -Doctor` first - it reports interpreter, dependencies, Tesseract, config and window status as PASS/WARN/FAIL. |
 | `capture backend selected: mss` + slow fps | dxcam unavailable; reinstall `dxcam`, run as the same user as the desktop session. |
 | Frames are 0, log says `waiting_for_window` | RDR2 Story Mode is not running, or the window title is not exactly a `window.title_patterns` entry (`window.match: exact` by default). Check `.\calibrate.ps1 -Inspect`. |
 | Colors look swapped in saved frames | Set `capture.color_order` explicitly (`bgr`/`rgb`); dxcam delivers RGB, mss delivers BGRA. |
@@ -448,8 +483,9 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 455 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 474 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
+.\run.ps1 -Doctor                            # environment self-check
 ```
 
 Conventions: type hints everywhere, no hardcoded tunables (config only),

@@ -3,7 +3,7 @@
 
 agent:
   name: rdr2-ai
-  phase: 9
+  phase: 10
   loop_hz: 10.0          # main decision-loop rate
 
 window:
@@ -140,6 +140,7 @@ rl:
   checkpoint: learning/policy.npz   # train: python -m src.ai.rl.train
   buffer: learning/buffer.npz  # transitions recorded while acting
   record: true                 # append (observation, action, reward) while acting
+  buffer_max: 20000            # cap recorded rows (oldest dropped; bounds RAM)
   explore: 0.1                 # chance of a random action while a policy runs
   temperature: 1.0             # softmax sampling temperature (>0)
   hidden: 16                   # MLP hidden units (must match the checkpoint)

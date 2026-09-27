@@ -16,13 +16,18 @@ import numpy as np
 
 
 class TransitionBuffer:
-    """In-memory transition store with ``.npz`` round-trip."""
+    """In-memory transition store with ``.npz`` round-trip.
 
-    def __init__(self) -> None:
+    ``max_rows`` caps memory on long runs: the oldest row is dropped and the
+    new head is promoted to an episode boundary.
+    """
+
+    def __init__(self, *, max_rows: int | None = None) -> None:
         self._obs: list[np.ndarray] = []
         self._actions: list[int] = []
         self._rewards: list[float] = []
         self._boundary: list[bool] = []
+        self._max_rows = max_rows
 
     def __len__(self) -> int:
         return len(self._actions)
@@ -54,6 +59,16 @@ class TransitionBuffer:
         self._actions.append(int(action))
         self._rewards.append(float(reward))
         self._boundary.append(bool(boundary))
+        if self._max_rows is not None and len(self._actions) > self._max_rows:
+            self._drop_oldest()
+
+    def _drop_oldest(self) -> None:
+        self._obs.pop(0)
+        self._actions.pop(0)
+        self._rewards.pop(0)
+        self._boundary.pop(0)
+        if self._boundary:
+            self._boundary[0] = True  # the new head starts an episode
 
     def as_arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         if not self._obs:
