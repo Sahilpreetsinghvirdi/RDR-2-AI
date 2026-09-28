@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ctypes
 import logging
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -14,6 +16,57 @@ from src.ui.debug_overlay import build_card, build_lines, draw_overlay, state_co
 
 log = logging.getLogger(__name__)
 
+_WM_SETICON = 0x80
+_ICON_BIG = 1
+_ICON_SMALL = 0
+_IMAGE_ICON = 1
+_LR_LOADFROMFILE = 0x10
+_LR_DEFAULTSIZE = 0x40
+_IDC_ARROW = 32512
+_GCL_HCURSOR = -12
+
+
+def window_icon_path() -> Path | None:
+    """Repo-bundled card icon; None when the asset is missing."""
+    path = Path(__file__).resolve().parents[2] / "assets" / "Outlaw.ico"
+    return path if path.is_file() else None
+
+
+def apply_window_icon(window_name: str, icon_path: Path) -> bool:
+    """Pin the icon on the card window (title bar and taskbar button)."""
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, window_name)
+        if not hwnd:
+            return False
+        hicon = user32.LoadImageW(
+            None, str(icon_path), _IMAGE_ICON, 0, 0,
+            _LR_LOADFROMFILE | _LR_DEFAULTSIZE,
+        )
+        if not hicon:
+            return False
+        user32.SendMessageW(hwnd, _WM_SETICON, _ICON_BIG, hicon)
+        user32.SendMessageW(hwnd, _WM_SETICON, _ICON_SMALL, hicon)
+        return True
+    except Exception:
+        return False
+
+
+def apply_arrow_cursor(window_name: str) -> bool:
+    """Replace OpenCV's crosshair with the normal arrow pointer."""
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, window_name)
+        if not hwnd:
+            return False
+        arrow = user32.LoadCursorW(None, _IDC_ARROW)
+        if not arrow:
+            return False
+        user32.SetClassLongW(hwnd, _GCL_HCURSOR, arrow)
+        return True
+    except Exception:
+        return False
+
 
 class Dashboard:
     """Renders the status card. Fails safe: GUI errors disable the window only."""
@@ -24,6 +77,7 @@ class Dashboard:
         self._disabled = not cfg.gui
         self._created = False
         self._keys = (emergency, pause, takeover)
+        self._chrome_applied = False
         self.shown = 0
         self.errors = 0
 
@@ -37,6 +91,16 @@ class Dashboard:
         flags = cv2.WINDOW_NORMAL if self._cfg.show_video else cv2.WINDOW_AUTOSIZE
         cv2.namedWindow(self._cfg.window_name, flags)
         self._created = True
+
+    def _ensure_chrome(self) -> None:
+        """Pin the icon and arrow cursor once the native window exists."""
+        if self._chrome_applied:
+            return
+        self._chrome_applied = True
+        icon = window_icon_path()
+        if icon is not None:
+            apply_window_icon(self._cfg.window_name, icon)
+        apply_arrow_cursor(self._cfg.window_name)
 
     def _panel(self, status: AgentStatus, height: int) -> np.ndarray:
         width = max(160, self._cfg.panel_width)
@@ -94,6 +158,7 @@ class Dashboard:
                 )
             cv2.imshow(self._cfg.window_name, view)
             cv2.waitKey(1)
+            self._ensure_chrome()
             self.shown += 1
         except Exception as exc:
             self.errors += 1

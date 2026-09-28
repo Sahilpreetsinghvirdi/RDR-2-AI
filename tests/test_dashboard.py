@@ -90,6 +90,44 @@ def test_dashboard_disabled_is_noop() -> None:
     assert dash.enabled is False
 
 
+def test_window_chrome_helpers_fail_safe() -> None:
+    from pathlib import Path
+
+    from src.ui.dashboard import (
+        apply_arrow_cursor,
+        apply_window_icon,
+        window_icon_path,
+    )
+
+    assert window_icon_path() is not None
+    assert window_icon_path().is_file()
+    assert apply_window_icon("no-such-window-xyz", window_icon_path()) is False
+    assert apply_window_icon("no-such-window-xyz", Path("missing.ico")) is False
+    assert apply_arrow_cursor("no-such-window-xyz") is False
+
+
+def test_show_applies_chrome_once(monkeypatch) -> None:
+    import cv2
+
+    import src.ui.dashboard as dash_mod
+
+    calls: list[str] = []
+    monkeypatch.setattr(cv2, "namedWindow", lambda *args: None)
+    monkeypatch.setattr(cv2, "imshow", lambda *args: None)
+    monkeypatch.setattr(cv2, "waitKey", lambda *args: None)
+    monkeypatch.setattr(
+        dash_mod, "apply_window_icon", lambda *args: calls.append("icon")
+    )
+    monkeypatch.setattr(
+        dash_mod, "apply_arrow_cursor", lambda *args: calls.append("cursor")
+    )
+    dash = Dashboard(DebugConfig(gui=True))
+    dash.show(None, AgentStatus())
+    dash.show(None, AgentStatus())
+    assert dash.shown == 2
+    assert calls == ["icon", "cursor"]
+
+
 def test_card_uses_configured_title() -> None:
     default = build_card(AgentStatus(state="RUNNING"))
     custom = build_card(AgentStatus(state="RUNNING"), title="Arthur")
