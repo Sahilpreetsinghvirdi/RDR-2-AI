@@ -76,6 +76,7 @@ class StoryRunner:
         self._marker_seen = False
         self._identify_until = 0.0
         self._identified = False
+        self._quiet_since = 0.0
         self._mount_whistled = False
         self._mount_settle_until = 0.0
         self._heading = float(control.nav.start_heading_deg)
@@ -227,6 +228,8 @@ class StoryRunner:
         self._stage = stage
         self._stage_started = now
         self._banner_counter = 0
+        if stage == "complete":
+            self._quiet_since = now
 
     def _step_mount(
         self, now: float, status: StatusTracker, game_state: GameState | None
@@ -452,7 +455,19 @@ class StoryRunner:
         log.info("story: mission '%s' - nearest marker %s", self._name, reason)
         self._locomotion.stop()
         self._marker_seen = False
-        self._enter_identify(now)
+        if self._library_has_titles():
+            self._enter_identify(now)
+        else:
+            self._enter_post_identify(now)
+
+    def _library_has_titles(self) -> bool:
+        for profile in self._profiles:
+            titles = profile.get("titles") or []
+            if isinstance(titles, list) and any(
+                isinstance(t, str) and t.strip() for t in titles
+            ):
+                return True
+        return False
 
     def _enter_identify(self, now: float) -> None:
         self._goto("identify", now)
@@ -572,11 +587,26 @@ class StoryRunner:
         if hit is not None:
             self._advance(now, f"completion seen ({hit!r})")
             return
+        if self._anything_on_screen(game_state):
+            self._quiet_since = now
+        elif now - self._quiet_since >= self._cfg.completion_idle_timeout_s:
+            self._advance(now, "nothing happening - moving on")
+            return
         if now - self._stage_started >= self._cfg.completion_timeout_s:
             self._advance(
                 now,
                 f"completion not seen after {self._cfg.completion_timeout_s:.0f}s",
             )
+
+    @staticmethod
+    def _anything_on_screen(game_state: GameState | None) -> bool:
+        if game_state is None:
+            return False
+        return bool(
+            game_state.mission.objective_text
+            or game_state.mission.prompt_text
+            or game_state.dialogue.text
+        )
 
     def _find_completion(
         self, game_state: GameState | None, frame: np.ndarray | None

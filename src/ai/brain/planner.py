@@ -96,6 +96,8 @@ class BrainPlanner:
         self._failures = 0
         self._latency_ms = 0.0
         self._note = "starting"
+        self._last_action = ""
+        self._last_reason = ""
         self._thread = threading.Thread(
             target=self._loop, name="brain", daemon=True
         )
@@ -140,6 +142,10 @@ class BrainPlanner:
             self.observe(frame)
         with self._lock:
             self._summary = _summarize(game_state)
+            if self._last_action:
+                self._summary["previous"] = (
+                    f"{self._last_action} ({self._last_reason})"
+                )
             action, reason = self._action, self._reason
             age = now - self._decided_at
             fresh = not self._executed and age <= self._cfg.stale_after_s
@@ -153,6 +159,10 @@ class BrainPlanner:
             )
             return
         self._execute(action)
+        with self._lock:
+            self._last_action = action
+            self._last_reason = reason
+            self._summary["previous"] = f"{action} ({reason})"
         status.update(
             goal=f"BRAIN (phase {status.phase})",
             action=f"brain:{action}",

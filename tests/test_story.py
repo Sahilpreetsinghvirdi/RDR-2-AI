@@ -684,7 +684,10 @@ def test_nearest_scans_when_no_marker() -> None:
 
 
 def test_nearest_arrives_when_marker_consumed() -> None:
-    runner = _runner(_nearest_cfg(title_wait_s=1.0))
+    runner = _runner(_nearest_cfg(
+        title_wait_s=1.0,
+        missions=[{"name": "hunt", "nearest": True, "titles": ["dutch"]}],
+    ))
     status = _status()
     state = GameState()
     state.mission.objective_location_estimate = [0.3, -0.3]
@@ -697,13 +700,63 @@ def test_nearest_arrives_when_marker_consumed() -> None:
     assert runner.stage == "complete"
 
 
+def test_nearest_skips_identify_without_titles() -> None:
+    runner = _runner(_nearest_cfg())
+    status = _status()
+    state = GameState()
+    state.mission.objective_location_estimate = [0.3, -0.3]
+    runner.step(0.0, status, None, state)
+    runner.step(0.1, status, None, state)
+    state.mission.objective_location_estimate = None
+    runner.step(0.2, status, None, state)
+    assert runner.stage == "complete"
+
+
+def test_complete_advances_early_when_nothing_happens() -> None:
+    cfg = _story_cfg(
+        completion_idle_timeout_s=2.0,
+        missions=[
+            {"name": "a", "legs": [[0.0, 5.0]]},
+            {"name": "b", "legs": []},
+        ],
+    )
+    runner = _runner(cfg)
+    status = _status()
+    state = GameState()
+    runner.step(0.0, status, None, state)
+    assert runner.stage == "complete"
+    runner.step(1.0, status, None, state)
+    assert runner.index == 0
+    runner.step(3.0, status, None, state)
+    assert runner.index == 1
+
+
+def test_complete_waits_while_text_visible() -> None:
+    cfg = _story_cfg(
+        completion_idle_timeout_s=2.0,
+        completion_timeout_s=60.0,
+        missions=[
+            {"name": "a", "legs": [[0.0, 5.0]]},
+            {"name": "b", "legs": []},
+        ],
+    )
+    runner = _runner(cfg)
+    status = _status()
+    state = GameState()
+    state.mission.objective_text = "Follow Dutch"
+    runner.step(0.0, status, None, state)
+    runner.step(30.0, status, None, state)
+    assert runner.index == 0
+    assert runner.stage == "complete"
+
+
 def test_nearest_arrives_inside_radius() -> None:
     runner = _runner(_nearest_cfg(marker_persist_frames=1))
     status = _status()
     state = GameState()
     state.mission.objective_location_estimate = [0.02, -0.02]
     runner.step(0.0, status, None, state)
-    assert runner.stage == "identify"
+    assert runner.stage == "complete"
 
 
 def test_nearest_timeout_skips_forward() -> None:
@@ -807,3 +860,9 @@ def test_nearest_config_validated() -> None:
     bad_wait.story.title_wait_s = 0.0
     with pytest.raises(ConfigError, match=r"title_wait_s"):
         bad_wait.validate()
+
+    bad_idle = AppConfig()
+    bad_idle.story = _story_cfg()
+    bad_idle.story.completion_idle_timeout_s = 0.0
+    with pytest.raises(ConfigError, match="completion_idle_timeout_s"):
+        bad_idle.validate()

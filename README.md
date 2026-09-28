@@ -417,7 +417,7 @@ tools/
   input_check.py       test keyboard/mouse injection
 docs/
   CONTROLS.md          full PC controls reference + agent key cross-map
-tests/                 616 tests (pytest)
+tests/                 621 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -643,7 +643,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 616 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 621 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 .\run.ps1 -Doctor                            # environment self-check
 .\run.ps1 -ControlTest                       # guided input verification

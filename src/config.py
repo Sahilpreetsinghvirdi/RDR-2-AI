@@ -385,6 +385,7 @@ class StoryConfig:
     travel_timeout_s: float = 600.0      # route leg stage budget
     objective_timeout_s: float = 900.0   # task stage budget
     completion_timeout_s: float = 60.0   # completion-watch budget
+    completion_idle_timeout_s: float = 30.0  # blank screen this long = move on
     pause_grace_s: float = 15.0          # longer step gaps count as pause time
     opportunistic: bool = True           # detour to stranger markers when seen
     mount_timeout_s: float = 60.0        # whistle/wait budget for the mount stage
@@ -734,7 +735,8 @@ class AppConfig:
                 )
         for sname in (
             "travel_timeout_s", "objective_timeout_s",
-            "completion_timeout_s", "pause_grace_s",
+            "completion_timeout_s", "completion_idle_timeout_s",
+            "pause_grace_s",
             "mount_timeout_s", "mount_wait_s", "mounted_speed_mps",
             "dismount_wait_s", "roam_leg_m", "roam_turn_deg",
             "title_wait_s",

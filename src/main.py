@@ -311,7 +311,8 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         watchdog.register_thread("render", render_thread)
         watchdog.start()
         machine.request(AgentState.RUNNING, "startup")
-        events.emit("startup", phase=cfg.agent.phase, backend=cfg.capture.backend)
+        events.emit("startup", name=cfg.agent.name, phase=cfg.agent.phase,
+                      backend=cfg.capture.backend)
         log.info(
             "agent running: loop=%.1fHz capture=%d fps backend=%s gui=%s demo=%s",
             cfg.agent.loop_hz, cfg.capture.target_fps, cfg.capture.backend,

@@ -250,3 +250,26 @@ def test_brain_defaults_disabled() -> None:
     assert BrainConfig().enabled is False
     assert AppConfig().brain.enabled is False
     assert set(ACTIONS) >= {"forward", "noop", "interact", "whistle"}
+
+
+def test_previous_action_feeds_next_prompt() -> None:
+    prompts: list[str] = []
+
+    def ask(prompt: str, _image: str) -> str:
+        prompts.append(prompt)
+        return '{"action": "forward", "reason": "ride on"}'
+
+    cfg = BrainConfig(enabled=True, interval_s=3600.0)
+    loco = FakeLocomotion()
+    planner = BrainPlanner(cfg, loco, ask_fn=ask)  # type: ignore[arg-type]
+    try:
+        status = StatusTracker(phase=11)
+        planner.observe(_frame())
+        planner._cycle()  # noqa: SLF001
+        assert "- previous:" not in prompts[0]
+        planner.step(time.monotonic(), status, _frame(), GameState())
+        planner.observe(_frame())
+        planner._cycle()  # noqa: SLF001
+        assert "- previous: forward (ride on)" in prompts[1]
+    finally:
+        planner.close()

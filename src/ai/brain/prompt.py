@@ -32,7 +32,7 @@ def build_prompt(summary: dict[str, object]) -> str:
     ]
     for key in (
         "threat", "wanted", "enemies", "health", "stamina", "dead_eye",
-        "objective", "prompt", "dialogue", "ammo",
+        "objective", "prompt", "dialogue", "ammo", "previous",
     ):
         value = summary.get(key)
         if value is None or value == "":
@@ -43,6 +43,8 @@ def build_prompt(summary: dict[str, object]) -> str:
         "Guidance: ride or walk toward mission markers and objectives;",
         "face what you approach before moving; use interact on prompts;",
         "whistle only to call your horse; noop when waiting or unsure.",
+        "Do not undo your previous action unless the scene changed -",
+        "keep riding or walking in the same direction across decisions.",
         'Reply with JSON only, no other text: {"action": "...", "reason": "..."}',
     ])
     return "\n".join(lines)

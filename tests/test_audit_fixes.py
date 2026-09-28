@@ -329,6 +329,24 @@ def test_release_all_best_effort_under_lock() -> None:
     assert ctrl.held_keys == []
 
 
+def test_startup_event_carries_agent_name(tmp_path: Path, monkeypatch) -> None:
+    from src.main import main
+
+    cfg_path = _agent_yaml(tmp_path, "")
+    monkeypatch.setattr("src.main.GameWindowManager", FakeWindowManager)
+    rc = main(["--config", str(cfg_path), "--headless", "--duration", "1"])
+    assert rc == 0
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "events.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    startups = [row for row in rows if row["kind"] == "startup"]
+    assert startups
+    assert startups[0]["name"] == "rdr2-ai"
+
+
 def test_merge_keeps_open_map_keys(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
