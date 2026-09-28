@@ -8,7 +8,9 @@ identification, stranger/camp profiles, auto-greet) plus Mode 2
 (`.\run.ps1 -Interactive`: pick a mission, free roam, or observe) and
 `agent.mode`. Still needs live-game work: authored real-mission profiles
 with calibrated legs and title keywords (starters are commented in
-`config.yaml`). See the README "Story mode" section.
+`config.yaml`). Experimental: the local vision brain (`src/ai/brain`,
+`.\run.ps1 -Brain`) replaces the scripted directors with a seeing model -
+slow on CPU, but visual. See the README "Story mode" section.
 
 ## Mode 1 - Full Autonomous Story Mode
 The AI plays the story end-to-end on its own.

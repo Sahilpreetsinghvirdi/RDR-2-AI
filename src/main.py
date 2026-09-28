@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable
 
 from src import __version__
+from src.ai.brain import BrainPlanner
 from src.ai.rl.planner import PolicyPlanner, rl_summary
 from src.ai.threat import ThreatAssessor
 from src.capture.screen_capture import FramePacket, ScreenCapture
@@ -82,6 +83,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="run the story mode director over story.missions (Mode 1)",
     )
     parser.add_argument(
+        "--brain", action="store_true",
+        help="let the local vision model drive (needs ollama + model)",
+    )
+    parser.add_argument(
         "--interactive", action="store_true",
         help="ask what to do each session: pick a mission, free roam, observe (Mode 2)",
     )
@@ -115,9 +120,12 @@ def _apply_cli_overrides(cfg: AppConfig, args: argparse.Namespace) -> None:
     if args.story:
         cfg.story.enabled = True
         cfg.validate()
+    if args.brain:
+        cfg.brain.enabled = True
+        cfg.validate()
     if not args.interactive and (
         cfg.mission.enabled or cfg.control.enabled
-        or cfg.story.enabled or cfg.rl.enabled
+        or cfg.story.enabled or cfg.rl.enabled or cfg.brain.enabled
     ):
         cfg.agent.mode = "autonomous"
 
@@ -225,6 +233,13 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             )
         else:
             log.warning("rl enabled but inactive: %s", policy_planner.reason)
+    brain: BrainPlanner | None = None
+    if cfg.brain.enabled:
+        brain = BrainPlanner(cfg.brain, locomotion)
+        log.info(
+            "brain enabled - model=%s interval=%.1fs",
+            cfg.brain.model, cfg.brain.interval_s,
+        )
 
     events_path = cfg.resolve(cfg.telemetry.dir) / cfg.telemetry.events_file
     events = EventLog(events_path if cfg.telemetry.file else None)
@@ -306,7 +321,7 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             cfg, args, machine, heartbeats, wm, capture, fast, perception,
             game_state, status, input_ctrl, recorder, events, demo, started,
             locomotion, planner, responder, assessor, combat, survival,
-            policy_planner, guard,
+            policy_planner, brain, guard,
         )
     except KeyboardInterrupt:
         log.warning("interrupted by user (Ctrl+C)")
@@ -336,6 +351,8 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
             saved = policy_planner.close()
             if saved is not None:
                 events.emit("rl_buffer", path=str(saved))
+        if brain is not None:
+            brain.close()
         events.emit(
             "shutdown",
             state=machine.state.value,
@@ -445,6 +462,7 @@ def _agent_loop(
     combat: CombatPlanner | None = None,
     survival: SurvivalPlanner | None = None,
     policy_planner: PolicyPlanner | None = None,
+    brain: BrainPlanner | None = None,
     guard: ComponentGuard | None = None,
 ) -> int:
     if guard is None:
@@ -497,7 +515,7 @@ def _agent_loop(
             last_pres = _run_active_work(
                 cfg, capture, fast, perception, game_state, packet, info, status,
                 input_ctrl, recorder, demo, events, locomotion, planner, responder,
-                assessor, combat, survival, policy_planner, guard,
+                assessor, combat, survival, policy_planner, brain, guard,
             )
         else:
             _halt_drivers(locomotion, combat, survival, policy_planner, game_state)
@@ -578,6 +596,7 @@ def _run_active_work(
     combat: CombatPlanner | None = None,
     survival: SurvivalPlanner | None = None,
     policy_planner: PolicyPlanner | None = None,
+    brain: BrainPlanner | None = None,
     guard: ComponentGuard | None = None,
 ) -> PerceptionResult | None:
     if guard is None:
@@ -700,6 +719,9 @@ def _run_active_work(
             elif policy_planner is not None:
                 guard.call("policy", policy_planner.step, time.monotonic(),
                            status, packet.image, game_state)
+            elif brain is not None:
+                guard.call("brain", brain.step, time.monotonic(),
+                           status, packet.image, game_state)
             elif demo is not None:
                 status.update(
                     goal=f"IDLE (phase {cfg.agent.phase})", action="none"
@@ -718,6 +740,7 @@ def _disable_primary_drivers(cfg: AppConfig) -> None:
     cfg.control.enabled = False
     cfg.story.enabled = False
     cfg.rl.enabled = False
+    cfg.brain.enabled = False
 
 
 def _apply_interactive_choice(cfg: AppConfig) -> None:

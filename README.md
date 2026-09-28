@@ -324,6 +324,26 @@ stranger template, honor roam) live commented under `story:` in
 `config.yaml` - uncomment and calibrate. `.\run.ps1 -Interactive` asks each
 session which mission to run, offers free roam, or just observes.
 
+### Local vision brain (experimental)
+
+`src/ai/brain/` (`.\run.ps1 -Brain`) puts a local vision-language model in
+charge instead of the scripted directors. A background thread sends a
+downscaled screenshot plus the game-state summary (threat, cores,
+objective/prompt/dialogue text) to ollama every `brain.interval_s` and gets
+back exactly one skill action (`forward`, `turn_left`, `interact`,
+`whistle`, ...) with a one-line reason; the main loop executes it while
+fresh (`brain.stale_after_s`) through the same guarded input. Combat and
+survival stay armed underneath as instant reflexes; broken replies fall back
+to `noop`, and model errors only ever skip a decision - the loop cannot be
+crashed by the model.
+
+Requirements: ollama installed (`winget install Ollama.Ollama`) plus a
+vision model (`ollama pull qwen2.5vl:3b`, ~3.2 GB in `~\.ollama\models`).
+Honest speed on CPU-only machines: tens of seconds per decision (measured
+~3 min cold start, faster warm) - Arthur thinks slowly but genuinely looks
+at the screen. `brain` is a primary driver: it conflicts with `mission`,
+`control`, `story` and `rl`.
+
 ## Architecture
 
 ```
@@ -378,6 +398,10 @@ src/
     runner.py          story director: travel -> objective -> complete -> next
   ai/
     threat.py          Phase 7 threat assessor (damage window, level ladder)
+    brain/
+      client.py        ollama HTTP client (stdlib urllib, vision decisions)
+      prompt.py        strict single-action prompt + defensive JSON parsing
+      planner.py       background thinker thread + fresh-decision executor
     rl/
       features.py      Phase 9 fixed observation featurizer (presence flags)
       actions.py       Phase 9 discrete action space (scripted skills)
@@ -393,7 +417,7 @@ tools/
   input_check.py       test keyboard/mouse injection
 docs/
   CONTROLS.md          full PC controls reference + agent key cross-map
-tests/                 604 tests (pytest)
+tests/                 616 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -517,6 +541,7 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | `combat`    | self-defense on/off, engage thresholds, aim/fire/retreat clamps |
 | `survival`  | core-triggered remedies (key sequences, needs, cooldowns, hysteresis) |
 | `rl`        | learned-policy driver (mode, checkpoint/buffer paths, reward weights) |
+| `brain`     | local vision-model driver (ollama model/host, cadence, staleness) - experimental, off by default |
 | `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators + minimap enemy blips, `dialogue` band/keywords/reactions, `ocr` engine/throttling |
 | `debug`     | dashboard window, `show_overlay`/`show_hud` boxes, panel width |
 | `recording` | fps, format, max frames, state jsonl |
@@ -586,6 +611,11 @@ synthetic backend ~24 fps, ~3 ms latency.
     strategy; plus Mode 2 (`.\run.ps1 -Interactive`: pick a mission,
     free roam, observe) and `agent.mode`. Starter profiles live commented
     in `config.yaml` - legs still need in-game calibration.
+13. **Local vision brain (experimental, done)** - `src/ai/brain` behind
+    `brain.enabled` (or `.\run.ps1 -Brain`): background-thread VLM strategist
+    (qwen2.5vl:3b via ollama) that sees the screen and picks skill actions,
+    executed while fresh through guarded input; combat/survival stay as
+    reflexes. Slow on CPU-only machines, but genuinely visual.
 
 Each phase ships with tests and stays revertible: the safety layer and manual
 hotkeys are never bypassed by later phases.
@@ -613,7 +643,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 604 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 616 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 .\run.ps1 -Doctor                            # environment self-check
 .\run.ps1 -ControlTest                       # guided input verification

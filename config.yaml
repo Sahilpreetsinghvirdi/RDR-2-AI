@@ -101,11 +101,19 @@ mission:
     - log: {text: "mission complete"}
 
 story:
-  enabled: false               # story director: mount/travel/dismount/objective/complete (NOTES Mode 1)
+  enabled: true                # story director: mount/travel/dismount/objective/complete (NOTES Mode 1)
   auto_greet: true             # greet every opportunity (honor strategy)
   opportunistic: true          # detour to stranger markers when visible
   completion_keywords: [mission passed, mission complete, mission completed]
-  missions: []                 # run top to bottom; uncomment starters below
+  missions:
+    - name: closest mission, whoever it is
+      mount: true              # whistle + board, ride at horse speed
+      nearest: true            # scan, chase the nearest marker, identify title
+    - name: next closest mission
+      mount: true
+      nearest: true
+    - name: honor roam          # wander + greet + survival upkeep, never ends
+      roam: true
   # ---- starter profiles (uncomment + calibrate legs in game first!) ----
   # Legs are dead-reckoned [bearing_deg, meters] from where Arthur stands.
   # Stand Arthur at the start, face the target, set start_heading_deg: 0.0
@@ -145,7 +153,7 @@ story:
   #     - {kind: key, name: esc}        # back out if the layout differs
 
 combat:
-  enabled: false               # self-defense: aim + fire (off = observe only)
+  enabled: true                # self-defense: aim + fire (off = observe only)
   engage_min_wanted: 1         # wanted stars required to engage
   engage_enemies: 1            # minimap red blips required to engage
   engage_on_incoming_fire: true
@@ -163,7 +171,7 @@ combat:
   disengage_clear_s: 1.5       # threat clear this long before standing down
 
 survival:
-  enabled: false               # eat/drink when cores drop (observe only when off)
+  enabled: true                # eat/drink when cores drop (observe only when off)
   require_clear: true          # never start or continue a remedy under threat
   recover_margin: 0.15         # cores must recover this far above the
                                # threshold before the remedy re-arms

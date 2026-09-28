@@ -14,6 +14,7 @@ param(
     [switch]$Autopilot,
     [switch]$Mission,
     [switch]$Story,
+    [switch]$Brain,
     [switch]$Interactive,
     [switch]$Headless,
     [switch]$Record,
@@ -38,8 +39,8 @@ if ($Doctor -and $ControlTest) {
     Write-Error "-Doctor and -ControlTest are mutually exclusive - pick one"
     exit 1
 }
-if (($Doctor -or $ControlTest) -and ($Demo -or $Autopilot -or $Mission -or $Story -or $Interactive -or $Headless -or $Record -or ($Backend -ne ""))) {
-    Write-Error "-Demo/-Autopilot/-Mission/-Story/-Interactive/-Headless/-Record/-Backend apply to agent runs only, not to -Doctor/-ControlTest"
+if (($Doctor -or $ControlTest) -and ($Demo -or $Autopilot -or $Mission -or $Story -or $Brain -or $Interactive -or $Headless -or $Record -or ($Backend -ne ""))) {
+    Write-Error "-Demo/-Autopilot/-Mission/-Story/-Brain/-Interactive/-Headless/-Record/-Backend apply to agent runs only, not to -Doctor/-ControlTest"
     exit 1
 }
 
@@ -59,6 +60,7 @@ if ($Doctor) {
     if ($Autopilot) { $argsList += "--autopilot" }
     if ($Mission) { $argsList += "--mission" }
     if ($Story) { $argsList += "--story" }
+    if ($Brain) { $argsList += "--brain" }
     if ($Interactive) { $argsList += "--interactive" }
     if ($Headless) { $argsList += "--headless" }
     if ($Record) { $argsList += "--record" }

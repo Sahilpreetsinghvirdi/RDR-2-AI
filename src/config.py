@@ -399,6 +399,21 @@ class StoryConfig:
 
 
 @dataclass
+class BrainConfig:
+    """Local VLM brain: sees the screen, picks skill actions (default off)."""
+
+    enabled: bool = False               # off = the brain thread never runs
+    model: str = "qwen2.5vl:3b"         # ollama vision model tag
+    host: str = "http://127.0.0.1:11434"  # ollama serve endpoint
+    interval_s: float = 8.0             # seconds between model decisions
+    timeout_s: float = 300.0            # HTTP timeout per decision (CPU is slow)
+    stale_after_s: float = 300.0        # decisions older than this are dropped
+    max_image_px: int = 640             # downscale width before sending
+    turn_step_deg: float = 15.0         # camera turn for turn_left/turn_right
+    step_s: float = 0.5                 # move burst for forward/back/strafe/sprint
+
+
+@dataclass
 class DebugConfig:
     gui: bool = True
     window_name: str = "RDR2 AI - Debug"
@@ -444,6 +459,7 @@ class AppConfig:
     combat: CombatConfig = field(default_factory=CombatConfig)
     survival: SurvivalConfig = field(default_factory=SurvivalConfig)
     rl: RlConfig = field(default_factory=RlConfig)
+    brain: BrainConfig = field(default_factory=BrainConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
@@ -883,6 +899,41 @@ class AppConfig:
         if story.enabled and rl.enabled:
             problems.append(
                 "story.enabled conflicts with rl.enabled (pick one primary driver)"
+            )
+        brain = self.brain
+        if not isinstance(brain.model, str) or not brain.model.strip():
+            problems.append("brain.model must be a non-empty model tag")
+        if not isinstance(brain.host, str) or not brain.host.strip():
+            problems.append("brain.host must be a non-empty URL")
+        for name in ("interval_s", "timeout_s", "stale_after_s",
+                     "turn_step_deg", "step_s"):
+            value = getattr(brain, name)
+            if (
+                not isinstance(value, (int, float)) or isinstance(value, bool)
+                or value <= 0
+            ):
+                problems.append(f"brain.{name} must be > 0")
+        if (
+            not isinstance(brain.max_image_px, int)
+            or isinstance(brain.max_image_px, bool)
+            or brain.max_image_px < 160
+        ):
+            problems.append("brain.max_image_px must be an int >= 160")
+        if brain.enabled and mission.enabled:
+            problems.append(
+                "brain.enabled conflicts with mission.enabled (pick one primary driver)"
+            )
+        if brain.enabled and self.control.enabled:
+            problems.append(
+                "brain.enabled conflicts with control.enabled (pick one primary driver)"
+            )
+        if brain.enabled and rl.enabled:
+            problems.append(
+                "brain.enabled conflicts with rl.enabled (pick one primary driver)"
+            )
+        if brain.enabled and story.enabled:
+            problems.append(
+                "brain.enabled conflicts with story.enabled (pick one primary driver)"
             )
         dlg = self.vision.dialogue
         region = dlg.region
