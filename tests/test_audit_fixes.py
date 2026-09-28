@@ -458,6 +458,21 @@ def test_runner_taps_key_role() -> None:
     assert runner.done is True
 
 
+def test_tap_falls_back_to_raw_key() -> None:
+    ctrl, kb = _input()
+    loco = LocomotionController(ControlConfig(), ctrl)  # type: ignore[arg-type]
+    assert loco.tap("down") is True
+    assert kb.ups == ["down"]
+    assert kb.held == []
+
+
+def test_key_task_accepts_raw_keys() -> None:
+    cfg = AppConfig()
+    cfg.mission.enabled = True
+    cfg.mission.tasks = [{"key": {"name": "down"}}]
+    cfg.validate()
+
+
 def test_whistle_key_role_exists() -> None:
     assert ControlConfig().keys["whistle"] == "h"
     assert normalize_key("h").name == "h"

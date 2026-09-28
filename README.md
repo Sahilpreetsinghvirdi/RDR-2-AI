@@ -301,9 +301,12 @@ story:
       legs: [[10.0, 40.0]]
 ```
 
-Route legs are dead-reckoned and real mission profiles need authoring +
-playtesting against the live game (see NOTES.md); dismounting at the
-destination is not implemented yet.
+Route legs are dead-reckoned: stand Arthur at the start, face the target,
+and measure legs with `.\calibrate.ps1 -Inspect` before trusting a profile.
+Starter profiles (camp rest with satchel eating, save-game menu flow,
+stranger template, honor roam) live commented under `story:` in
+`config.yaml` - uncomment and calibrate. `.\run.ps1 -Interactive` asks each
+session which mission to run, offers free roam, or just observes.
 
 ## Architecture
 
@@ -374,7 +377,7 @@ tools/
   input_check.py       test keyboard/mouse injection
 docs/
   CONTROLS.md          full PC controls reference + agent key cross-map
-tests/                 579 tests (pytest)
+tests/                 592 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -558,12 +561,14 @@ synthetic backend ~24 fps, ~3 ms latency.
     guided harness that sends every agent input primitive live and
     records your verdict against the reference.
 12. **Story mode (done)** - NOTES Mode 1 director behind
-    `story.enabled` (or `.\run.ps1 -Story`): mount/travel/objective/
-    completion stages over whistle + RoutePlanner + MissionRunner,
-    objective-region OCR, completion keywords with banner OCR, stage
-    timeouts, marker homing (`seek_marker`), stranger detours
-    (`kind: stranger` + opportunistic), auto-greet honor strategy.
-    Mission profiles still need authoring against the live game.
+    `story.enabled` (or `.\run.ps1 -Story`): mount/travel/dismount/
+    objective/roam/completion stages over whistle + RoutePlanner +
+    MissionRunner, objective-region OCR, completion keywords with banner
+    OCR, stage timeouts, marker homing (`seek_marker`), stranger/camp
+    profiles with opportunistic detours, auto-greet honor strategy; plus
+    Mode 2 (`.\run.ps1 -Interactive`: pick a mission, free roam, observe)
+    and `agent.mode`. Starter profiles live commented in `config.yaml` -
+    legs still need in-game calibration.
 
 Each phase ships with tests and stays revertible: the safety layer and manual
 hotkeys are never bypassed by later phases.
@@ -591,7 +596,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 579 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 592 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 .\run.ps1 -Doctor                            # environment self-check
 .\run.ps1 -ControlTest                       # guided input verification

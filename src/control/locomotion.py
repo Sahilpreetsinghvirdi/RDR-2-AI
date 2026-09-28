@@ -13,6 +13,7 @@ import time
 
 from src.config import ControlConfig
 from src.input.input_controller import InputController
+from src.input.keys import normalize_key
 
 log = logging.getLogger(__name__)
 
@@ -90,9 +91,14 @@ class LocomotionController:
         return ok
 
     def tap(self, action: str) -> bool:
-        """Single press of a configured action key (jump/interact)."""
-        key = self._cfg.keys.get(action)
-        if key is None:
+        """Tap a control role (jump/interact/whistle) or a raw key name."""
+        key = self._cfg.keys.get(action, action)
+        if not key:
+            log.warning("unknown action key: %r", action)
+            return False
+        try:
+            normalize_key(key)
+        except ValueError:
             log.warning("unknown action key: %r", action)
             return False
         return self._input.press(key)

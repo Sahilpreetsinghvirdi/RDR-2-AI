@@ -81,6 +81,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--story", action="store_true",
         help="run the story mode director over story.missions (Mode 1)",
     )
+    parser.add_argument(
+        "--interactive", action="store_true",
+        help="ask what to do each session: pick a mission, free roam, observe (Mode 2)",
+    )
     parser.add_argument("--headless", action="store_true", help="disable the debug window")
     parser.add_argument("--record", action="store_true", help="record frames to disk")
     parser.add_argument(
@@ -111,6 +115,11 @@ def _apply_cli_overrides(cfg: AppConfig, args: argparse.Namespace) -> None:
     if args.story:
         cfg.story.enabled = True
         cfg.validate()
+    if not args.interactive and (
+        cfg.mission.enabled or cfg.control.enabled
+        or cfg.story.enabled or cfg.rl.enabled
+    ):
+        cfg.agent.mode = "autonomous"
 
 
 def make_region_provider(wm: GameWindowManager) -> Callable[[], Rect | None]:
@@ -704,11 +713,57 @@ def _run_active_work(
     return pres
 
 
+def _disable_primary_drivers(cfg: AppConfig) -> None:
+    cfg.mission.enabled = False
+    cfg.control.enabled = False
+    cfg.story.enabled = False
+    cfg.rl.enabled = False
+
+
+def _apply_interactive_choice(cfg: AppConfig) -> None:
+    """NOTES Mode 2: console picker over missions, free roam, or observe."""
+    missions = [p for p in cfg.story.missions if isinstance(p, dict)]
+    if not sys.stdin.isatty():
+        log.warning("interactive mode without a console - observing only")
+        _disable_primary_drivers(cfg)
+        cfg.agent.mode = "interactive"
+        cfg.validate()
+        return
+    print("RDR2 AI - what should Arthur do this session?")
+    for i, profile in enumerate(missions, start=1):
+        name = str(profile.get("name") or f"mission {i}")
+        kind = str(profile.get("kind", "story"))
+        print(f"  {i}. {name} [{kind}]")
+    print("  R. free roam (wander + greet + survival upkeep)")
+    print("  O. observe only")
+    try:
+        choice = input(
+            f"choice [1..{len(missions)}/R/O, default O]: "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        choice = "o"
+    if choice == "r":
+        _disable_primary_drivers(cfg)
+        cfg.story.missions = [{"name": "free roam", "kind": "story", "roam": True}]
+        cfg.story.enabled = True
+        cfg.story.loop = True
+    elif choice.isdigit() and 1 <= int(choice) <= len(missions):
+        cfg.story.missions = [missions[int(choice) - 1]]
+        _disable_primary_drivers(cfg)
+        cfg.story.enabled = True
+    else:
+        _disable_primary_drivers(cfg)
+    cfg.agent.mode = "interactive"
+    cfg.validate()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         cfg = load_config(args.config, args.overrides)
         _apply_cli_overrides(cfg, args)
+        if args.interactive:
+            _apply_interactive_choice(cfg)
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2

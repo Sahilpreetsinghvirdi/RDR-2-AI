@@ -45,6 +45,7 @@ class AgentConfig:
     name: str = "rdr2-ai"
     phase: int = 1
     loop_hz: float = 10.0
+    mode: str = "assist"              # assist | autonomous | interactive
 
 
 @dataclass
@@ -388,6 +389,9 @@ class StoryConfig:
     mount_timeout_s: float = 60.0        # whistle/wait budget for the mount stage
     mount_wait_s: float = 4.0            # settle time after mounting up
     mounted_speed_mps: float = 4.2       # route progress speed while mounted
+    dismount_wait_s: float = 2.5         # settle time after dismounting
+    roam_leg_m: float = 30.0             # wander straight-line distance
+    roam_turn_deg: float = 60.0          # wander turn at the end of each leg
     marker_persist_frames: int = 3       # consecutive frames to trust a marker
 
 
@@ -535,6 +539,11 @@ class AppConfig:
             problems.append("vision.world.enemy_max_dots must be an int >= 1")
         if not isinstance(self.agent.phase, int) or self.agent.phase < 1:
             problems.append(f"agent.phase must be an int >= 1, got {self.agent.phase!r}")
+        if self.agent.mode not in {"assist", "autonomous", "interactive"}:
+            problems.append(
+                f"agent.mode must be assist|autonomous|interactive, "
+                f"got {self.agent.mode!r}"
+            )
         ctrl = self.control
         missing = set(DEFAULT_CONTROL_KEYS) - set(ctrl.keys)
         extra = set(ctrl.keys) - set(DEFAULT_CONTROL_KEYS)
@@ -598,10 +607,12 @@ class AppConfig:
                 problems.append(str(exc))
             else:
                 for task in parsed_tasks:
-                    if task.kind == "key" and task.key not in self.control.keys:
+                    if task.kind == "key" and not _valid_key_name(
+                        self.control.keys, task.key
+                    ):
                         problems.append(
                             f"mission task key {task.key!r} must name "
-                            "a control.keys entry"
+                            "a control.keys entry or a raw key"
                         )
         story = self.story
         if story.enabled and not story.missions:
@@ -645,23 +656,31 @@ class AppConfig:
                     problems.append(f"{where}: {exc}")
                 else:
                     for task in parsed:
-                        if task.kind == "key" and task.key not in self.control.keys:
+                        if task.kind == "key" and not _valid_key_name(
+                            self.control.keys, task.key
+                        ):
                             problems.append(
                                 f"{where}: task key {task.key!r} must name "
-                                "a control.keys entry"
+                                "a control.keys entry or a raw key"
                             )
             if "wait_completion" in profile and not isinstance(
                 profile["wait_completion"], bool
             ):
                 problems.append(f"{where}.wait_completion must be a boolean")
             kind = profile.get("kind", "story")
-            if kind not in ("story", "stranger"):
+            if kind not in ("story", "stranger", "camp"):
                 problems.append(
-                    f"{where}.kind must be story|stranger, got {kind!r}"
+                    f"{where}.kind must be story|stranger|camp, got {kind!r}"
                 )
-            for flag in ("mount", "seek_marker"):
+            for flag in ("mount", "seek_marker", "roam", "dismount"):
                 if flag in profile and not isinstance(profile[flag], bool):
                     problems.append(f"{where}.{flag} must be a boolean")
+            bearing = profile.get("dismount_bearing")
+            if bearing is not None and (
+                not isinstance(bearing, (int, float))
+                or isinstance(bearing, bool)
+            ):
+                problems.append(f"{where}.dismount_bearing must be a number")
         if (
             not isinstance(story.completion_keywords, list)
             or any(
@@ -691,6 +710,7 @@ class AppConfig:
             "travel_timeout_s", "objective_timeout_s",
             "completion_timeout_s", "pause_grace_s",
             "mount_timeout_s", "mount_wait_s", "mounted_speed_mps",
+            "dismount_wait_s", "roam_leg_m", "roam_turn_deg",
         ):
             value = getattr(story, sname)
             if (
@@ -984,6 +1004,19 @@ def _normalize_remedies(surv: SurvivalConfig, problems: list[str]) -> None:
         else:
             fixed[name] = value
     surv.remedies = fixed
+
+
+def _valid_key_name(ctrl_keys: dict[str, str], name: str) -> bool:
+    """A key task name is valid when it is a control role or a raw key."""
+    if name in ctrl_keys:
+        return True
+    from src.input.keys import normalize_key  # lazy: keep config import-light
+
+    try:
+        normalize_key(name)
+    except ValueError:
+        return False
+    return True
 
 
 def _check_regions(regions: Any, where: str, problems: list[str]) -> None:

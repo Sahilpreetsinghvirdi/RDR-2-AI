@@ -27,14 +27,14 @@ import numpy as np
 from src.config import ControlConfig, MissionConfig, StoryConfig
 from src.control.locomotion import LocomotionController
 from src.mission.runner import MissionRunner
-from src.planning.route import RoutePlanner
+from src.planning.route import RoutePlanner, angle_delta
 from src.state.agent_status import StatusTracker
 from src.state.game_state import GameState
 from src.vision.ocr import OcrEngine
 
 log = logging.getLogger(__name__)
 
-_STAGES = ("mount", "travel", "objective", "complete", "done")
+_STAGES = ("mount", "travel", "dismount", "objective", "roam", "complete", "done")
 
 
 class StoryRunner:
@@ -74,6 +74,13 @@ class StoryRunner:
         self._marker_frames = 0
         self._mount_whistled = False
         self._mount_settle_until = 0.0
+        self._heading = float(control.nav.start_heading_deg)
+        self._dismount_faced = False
+        self._dismount_tapped = False
+        self._dismount_until = 0.0
+        self._roam_walked = 0.0
+        self._roam_turn_remaining = 0.0
+        self._roam_prev: float | None = None
         if not self._profiles:
             self._stage = "done"
             self._note = "no story missions configured"
@@ -114,8 +121,12 @@ class StoryRunner:
             self._step_mount(now, status, game_state)
         elif self._stage == "travel":
             self._step_travel(now, status, frame, game_state)
+        elif self._stage == "dismount":
+            self._step_dismount(now, status)
         elif self._stage == "objective":
             self._step_objective(now, status, frame, game_state)
+        elif self._stage == "roam":
+            self._step_roam(now, status)
         elif self._stage == "complete":
             self._step_complete(now, status, frame, game_state)
         if self._stage != "done":
@@ -137,6 +148,13 @@ class StoryRunner:
         self._marker_frames = 0
         self._mount_whistled = False
         self._mount_settle_until = 0.0
+        self._heading = float(self._control.nav.start_heading_deg)
+        self._dismount_faced = False
+        self._dismount_tapped = False
+        self._dismount_until = 0.0
+        self._roam_walked = 0.0
+        self._roam_turn_remaining = 0.0
+        self._roam_prev = None
         detour = self._opportunistic_target(game_state)
         if detour is not None:
             self._detour_from = self._index
@@ -159,6 +177,8 @@ class StoryRunner:
         self._tasks = [t for t in raw_tasks if isinstance(t, dict)]
         if profile.get("mount"):
             self._goto("mount", now)
+        elif profile.get("roam"):
+            self._goto("roam", now)
         else:
             self._after_mount(now)
         log.info(
@@ -255,8 +275,11 @@ class StoryRunner:
             self._fail_advance(f"route blocked ({self._route.current})", now)
             return
         if self._route.arrived:
+            self._heading = self._route.heading_deg
             self._route = None
-            if self._tasks:
+            if self._should_dismount():
+                self._goto("dismount", now)
+            elif self._tasks:
                 self._goto("objective", now)
             else:
                 self._goto("complete", now)
@@ -295,6 +318,74 @@ class StoryRunner:
         if self._locomotion.turn(delta):
             self._route.nudge_heading(delta)
             status.update(action=f"seek:{angle:+.0f}deg")
+
+    def _should_dismount(self) -> bool:
+        if self._mounted is None:
+            return False
+        profile = self._profiles[self._index]
+        return (
+            bool(profile.get("dismount"))
+            or profile.get("kind", "story") == "camp"
+        )
+
+    def _step_dismount(self, now: float, status: StatusTracker) -> None:
+        profile = self._profiles[self._index]
+        bearing = profile.get("dismount_bearing")
+        if bearing is not None and not self._dismount_faced:
+            err = angle_delta(float(bearing), self._heading)
+            if abs(err) <= self._control.nav.heading_tol_deg:
+                self._dismount_faced = True
+            else:
+                cap = self._control.max_turn_deg_per_tick
+                delta = max(-cap, min(err, cap))
+                if self._locomotion.turn(delta):
+                    self._heading += delta
+                status.update(action=f"dismount:turn{err:+.0f}deg")
+                return
+        if not self._dismount_tapped:
+            self._dismount_tapped = True
+            if self._locomotion.tap("interact"):
+                self._dismount_until = now + self._cfg.dismount_wait_s
+                status.update(action="dismount:wait")
+            else:
+                log.warning("story: dismount tap refused - continuing")
+            return
+        if now >= self._dismount_until:
+            self._mounted = None
+            self._locomotion.stop()
+            log.info("story: dismounted")
+            if self._tasks:
+                self._goto("objective", now)
+            else:
+                self._goto("complete", now)
+            log.info("story: mission '%s' - stage %s", self._name, self._stage)
+
+    def _step_roam(self, now: float, status: StatusTracker) -> None:
+        nav = self._driver_control.nav
+        dt = 0.0
+        if self._roam_prev is not None:
+            dt = min(max(now - self._roam_prev, 0.0), 1.0)
+        self._roam_prev = now
+        if abs(self._roam_turn_remaining) > 0.5:
+            cap = self._driver_control.max_turn_deg_per_tick
+            delta = max(-cap, min(self._roam_turn_remaining, cap))
+            if self._locomotion.turn(delta):
+                self._roam_turn_remaining -= delta
+            status.update(
+                action=f"roam:turn{self._roam_turn_remaining:+.0f}deg"
+            )
+            return
+        driving = self._locomotion.active
+        if not driving:
+            driving = self._locomotion.move("forward", nav.step_s)
+        if driving:
+            self._roam_walked += nav.walk_speed_mps * dt
+        if self._roam_walked >= self._cfg.roam_leg_m:
+            self._roam_walked = 0.0
+            self._roam_turn_remaining = self._cfg.roam_turn_deg
+            status.update(action="roam:leg done")
+        else:
+            status.update(action=f"roam:walk {self._roam_walked:.1f}m")
 
     def _step_objective(
         self,

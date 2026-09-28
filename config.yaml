@@ -100,6 +100,44 @@ mission:
     - interact: {}             # taps control.keys.interact (E)
     - log: {text: "mission complete"}
 
+story:
+  enabled: false               # story director: mount/travel/dismount/objective/complete (NOTES Mode 1)
+  auto_greet: true             # greet every opportunity (honor strategy)
+  opportunistic: true          # detour to stranger markers when visible
+  completion_keywords: [mission passed, mission complete, mission completed]
+  missions: []                 # run top to bottom; uncomment starters below
+  # ---- starter profiles (uncomment + calibrate legs in game first!) ----
+  # Legs are dead-reckoned [bearing_deg, meters] from where Arthur stands.
+  # Stand Arthur at the start, face the target, set start_heading_deg: 0.0
+  # in control.nav, then measure legs with .\calibrate.ps1 -Inspect.
+  # - name: honor roam            # works as-is: wander + greet + survival upkeep
+  #   roam: true
+  # - name: camp rest             # ride to camp, auto-dismount, chores
+  #   kind: camp
+  #   mount: true
+  #   legs: [[0.0, 120.0]]
+  #   tasks:
+  #     - {kind: wait, seconds: 10}     # stew pot / greet around camp
+  #     - {kind: key, name: b}          # open satchel (B)
+  #     - {kind: wait, seconds: 1}
+  #     - {kind: key, name: down}       # adjust to YOUR satchel item order!
+  #     - {kind: key, name: enter}      # eat the selected provision
+  #     - {kind: key, name: esc}        # close satchel
+  # - name: stranger on the road  # side mission: home to the ? marker
+  #   kind: stranger
+  #   seek_marker: true
+  #   legs: [[0.0, 40.0]]
+  #   tasks:
+  #     - {kind: wait_for, field: dialogue.encounter, equals: greet, timeout_s: 60}
+  # - name: save game             # pause menu save (calibrate arrows in game!)
+  #   tasks:
+  #     - {kind: key, name: esc}        # pause menu
+  #     - {kind: wait, seconds: 1}
+  #     - {kind: key, name: down}       # adjust: navigate to STORY tab
+  #     - {kind: key, name: enter}
+  #     - {kind: wait, seconds: 1}
+  #     - {kind: key, name: esc}        # back out if the layout differs
+
 combat:
   enabled: false               # self-defense: aim + fire (off = observe only)
   engage_min_wanted: 1         # wanted stars required to engage

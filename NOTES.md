@@ -1,11 +1,13 @@
 # Notes: Two Modes
 
 Status: **Mode 1 implemented** - `StoryRunner` behind
-`story.enabled = false` (mount/travel/objective/completion stages,
-objective-region OCR, completion keywords + banner OCR, stage timeouts,
-marker homing, stranger detours, auto-greet). Still design-only: dismounting
-at the destination, authored real-mission profiles, Mode 2 (interactive),
-`agent.mode`. See the README "Story mode" section.
+`story.enabled = false` (mount/travel/dismount/objective/roam/complete
+stages, objective-region OCR, completion keywords + banner OCR, stage
+timeouts, marker homing, stranger/camp profiles, auto-greet) plus Mode 2
+(`.\run.ps1 -Interactive`: pick a mission, free roam, or observe) and
+`agent.mode`. Still needs live-game work: authored real-mission profiles
+with calibrated legs (starters are commented in `config.yaml`). See the
+README "Story mode" section.
 
 ## Mode 1 - Full Autonomous Story Mode
 The AI plays the story end-to-end on its own.
@@ -39,19 +41,21 @@ between tasks; user answers (mission name / "free roam").
 - `StoryRunner` episode loop: stages `mount -> travel -> objective
   -> complete -> next step`; rides on top of existing RoutePlanner,
   mission tasks, prompt responder, survival, combat.
-  *implemented as `src/story/runner.py` (all four stages; dismount at the
-  destination not built).*
+  *implemented as `src/story/runner.py` (mount/travel/dismount/objective/
+  roam/complete stages).*
 - `story:` config section: named waypoints (legs), per-step scripts,
   mount/dismount keys, completion keywords, auto-greet toggle.
-  *implemented (legs, tasks incl. a generic `key` tap, keywords, banner
-  region, timeouts, auto-greet, `kind: stranger` + opportunistic detours,
-  `seek_marker` homing); dismount not built.*
+  *implemented (legs, tasks incl. a generic `key` tap for raw keys,
+  keywords, banner region, timeouts, auto-greet, `kind: stranger|camp` +
+  opportunistic detours, `seek_marker` homing, `roam` wandering;
+  starter profiles commented in `config.yaml`).*
 - Objective-region OCR into existing `GameState.mission.objective_text`
   (field exists, currently unused). *implemented (`vision.hud.regions.objective`).*
 - `nav.mounted_speed_mps` for route dead-reckoning while on horseback.
-  *not built.*
+  *implemented as `story.mounted_speed_mps` (mounted control copy).*
 - Interactive mode: console picker over a mission-profile library; a
-  `free_roam` profile with wander/greet/survive behaviors. *not built.*
+  `free_roam` profile with wander/greet/survive behaviors.
+  *implemented (`.\run.ps1 -Interactive`, `agent.mode`).*
 - Mission profiles: config-declared scripts per story mission (no
   memory reading; vision/OCR only) - real missions need authoring.
 

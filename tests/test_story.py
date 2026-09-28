@@ -30,6 +30,13 @@ class FakeLocomotion:
         self.tap_ok = True
         self.turns: list[float] = []
         self.turn_ok = True
+        self.moves: list[tuple[str, float, bool]] = []
+        self.move_ok = True
+        self._active = False
+
+    @property
+    def active(self) -> bool:
+        return self._active
 
     def stop(self) -> None:
         self.stops += 1
@@ -44,6 +51,11 @@ class FakeLocomotion:
     def turn(self, degrees: float) -> bool:
         self.turns.append(degrees)
         return self.turn_ok
+
+    def move(self, direction: str, duration_s: float, *,
+             sprint: bool = False) -> bool:
+        self.moves.append((direction, duration_s, sprint))
+        return self.move_ok
 
 
 class FakeRoute:
@@ -65,6 +77,10 @@ class FakeRoute:
     def nudge_heading(self, delta_deg: float) -> None:
         self.nudges.append(delta_deg)
         self.heading += delta_deg
+
+    @property
+    def heading_deg(self) -> float:
+        return self.heading
 
     def set_legs(self, legs: list[tuple[float, float]]) -> None:
         self.legs = list(legs)
@@ -521,3 +537,110 @@ def test_no_detour_without_marker() -> None:
     runner = _runner(_stranger_cfg())
     runner.step(0.0, _status(), None, GameState())
     assert runner.index == 0
+
+
+def _mounted_runner(cfg: StoryConfig, loco: FakeLocomotion,
+                    status: StatusTracker, state: GameState) -> StoryRunner:
+    runner = StoryRunner(cfg, ControlConfig(), loco)  # type: ignore[arg-type]
+    runner.step(0.0, status, None, state)
+    state.dialogue.encounter = "mount"
+    runner.step(1.0, status, None, state)
+    runner.step(6.0, status, None, state)
+    assert runner.stage == "travel"
+    return runner
+
+
+def test_dismount_after_mounted_travel() -> None:
+    cfg = _story_cfg(missions=[{
+        "name": "ride", "mount": True, "legs": [[0.0, 10.0]],
+        "dismount": True, "tasks": [{"kind": "log", "text": "hi"}],
+    }])
+    loco = FakeLocomotion()
+    status = _status()
+    state = GameState()
+    runner = _mounted_runner(cfg, loco, status, state)
+    runner.step(7.0, status, None, state)
+    assert runner.stage == "dismount"
+    assert loco.taps == ["whistle", "interact"]
+    runner.step(8.0, status, None, state)
+    assert loco.taps == ["whistle", "interact", "interact"]
+    runner.step(12.0, status, None, state)
+    assert runner._mounted is None  # noqa: SLF001
+    assert runner.stage == "objective"
+    runner.step(13.0, status, None, state)
+    assert len(FakeMission.instances) == 1
+
+
+def test_dismount_skipped_when_on_foot() -> None:
+    cfg = _story_cfg(missions=[{
+        "name": "walk", "legs": [[0.0, 10.0]], "dismount": True,
+    }])
+    runner = _runner(cfg)
+    status = _status()
+    runner.step(0.0, status)
+    assert runner.stage == "complete"
+    assert FakeRoute.instances[-1].control_arg.nav.walk_speed_mps == pytest.approx(1.6)
+
+
+def test_dismount_bearing_turns_first() -> None:
+    cfg = _story_cfg(missions=[{
+        "name": "ride", "mount": True, "legs": [[0.0, 10.0]],
+        "dismount": True, "dismount_bearing": 90.0,
+    }])
+    loco = FakeLocomotion()
+    status = _status()
+    state = GameState()
+    runner = _mounted_runner(cfg, loco, status, state)
+    runner.step(7.0, status, None, state)
+    assert runner.stage == "dismount"
+    runner.step(8.0, status, None, state)
+    runner.step(9.0, status, None, state)
+    runner.step(10.0, status, None, state)
+    assert loco.turns == [pytest.approx(30.0)] * 3
+    assert loco.taps == ["whistle", "interact"]
+    runner.step(11.0, status, None, state)
+    assert loco.taps == ["whistle", "interact", "interact"]
+
+
+def test_camp_forces_dismount() -> None:
+    cfg = _story_cfg(missions=[{
+        "name": "camp", "kind": "camp", "mount": True, "legs": [[0.0, 10.0]],
+    }])
+    loco = FakeLocomotion()
+    status = _status()
+    state = GameState()
+    runner = _mounted_runner(cfg, loco, status, state)
+    runner.step(7.0, status, None, state)
+    assert runner.stage == "dismount"
+    runner.step(8.0, status, None, state)
+    runner.step(12.0, status, None, state)
+    assert runner.stage == "complete"
+    assert runner._mounted is None  # noqa: SLF001
+
+
+def test_roam_wanders_and_turns() -> None:
+    cfg = _story_cfg(
+        roam_leg_m=3.0,
+        missions=[{"name": "roam", "roam": True}],
+    )
+    loco = FakeLocomotion()
+    runner = StoryRunner(cfg, ControlConfig(), loco)  # type: ignore[arg-type]
+    status = _status()
+    runner.step(0.0, status)
+    assert runner.stage == "roam"
+    runner.step(1.0, status)
+    runner.step(2.0, status)
+    assert loco.moves, "roam never walked"
+    runner.step(3.0, status)
+    runner.step(4.0, status)
+    assert loco.turns == [pytest.approx(30.0)] * 2
+    runner.step(5.0, status)
+    assert runner.stage == "roam"
+    assert runner.done is False
+
+
+def test_roam_profile_validated() -> None:
+    cfg = AppConfig()
+    cfg.story = _story_cfg(missions=[{"name": "r", "roam": "yes"}])
+    with pytest.raises(ConfigError, match=r"\.roam must be a boolean"):
+        cfg.validate()

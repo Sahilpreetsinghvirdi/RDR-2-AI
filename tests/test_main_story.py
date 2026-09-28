@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from src.config import AgentConfig, AppConfig, ConfigError
 from src.main import main
 from tests.test_main_guard import FakeWindowManager
 
@@ -15,6 +18,7 @@ class RecordingStory:
     def __init__(self, *args: object, **kwargs: object) -> None:
         self.steps = 0
         self.kwargs = dict(kwargs)
+        self.story_cfg = args[0] if args else None
         RecordingStory.instances.append(self)
 
     def step(
@@ -141,3 +145,73 @@ def test_story_flag_without_missions_fails(tmp_path: Path, monkeypatch) -> None:
     rc = main(["--config", str(cfg_path), "--story", "--headless",
                "--duration", "1"])
     assert rc == 2
+
+
+class FakeStdin:
+    def isatty(self) -> bool:
+        return True
+
+
+def _interactive_run(tmp_path: Path, monkeypatch, answer: str,
+                     story_block: str) -> int:
+    RecordingStory.instances = []
+    cfg_path = _write_base_config(tmp_path, story_block)
+    monkeypatch.setattr("src.main.GameWindowManager", FakeWindowManager)
+    monkeypatch.setattr("src.main.StoryRunner", RecordingStory)
+    monkeypatch.setattr("sys.stdin", FakeStdin())
+    monkeypatch.setattr("builtins.input", lambda _: answer)
+    return main(["--config", str(cfg_path), "--interactive", "--headless",
+                 "--duration", "1"])
+
+
+_MISSIONS_BLOCK = (
+    "story:\n  missions:\n    - name: one\n    - name: two\n"
+)
+
+
+def test_interactive_picks_mission(tmp_path: Path, monkeypatch) -> None:
+    rc = _interactive_run(tmp_path, monkeypatch, "2", _MISSIONS_BLOCK)
+    assert rc == 0
+    assert RecordingStory.instances, "story was not started"
+    picked = RecordingStory.instances[0].story_cfg.missions
+    assert [m["name"] for m in picked] == ["two"]
+
+
+def test_interactive_roam(tmp_path: Path, monkeypatch) -> None:
+    rc = _interactive_run(tmp_path, monkeypatch, "r", _MISSIONS_BLOCK)
+    assert rc == 0
+    assert RecordingStory.instances, "story was not started"
+    cfg = RecordingStory.instances[0].story_cfg
+    assert cfg.missions == [{"name": "free roam", "kind": "story", "roam": True}]
+    assert cfg.loop is True
+
+
+def test_interactive_observe_default(tmp_path: Path, monkeypatch) -> None:
+    rc = _interactive_run(tmp_path, monkeypatch, "", _MISSIONS_BLOCK)
+    assert rc == 0
+    assert RecordingStory.instances == []
+
+
+def test_interactive_no_tty_observes(tmp_path: Path, monkeypatch) -> None:
+    RecordingStory.instances = []
+    cfg_path = _write_base_config(tmp_path, _MISSIONS_BLOCK)
+    monkeypatch.setattr("src.main.GameWindowManager", FakeWindowManager)
+    monkeypatch.setattr("src.main.StoryRunner", RecordingStory)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    rc = main(["--config", str(cfg_path), "--interactive", "--headless",
+               "--duration", "1"])
+    assert rc == 0
+    assert RecordingStory.instances == []
+
+
+def test_agent_mode_values() -> None:
+    from src.main import _apply_cli_overrides, parse_args
+
+    with pytest.raises(ConfigError, match="agent.mode"):
+        AppConfig(agent=AgentConfig(mode="god")).validate()
+
+    auto = AppConfig()
+    auto.mission.enabled = True
+    auto.mission.tasks = [{"kind": "log", "text": "x"}]
+    _apply_cli_overrides(auto, parse_args([]))
+    assert auto.agent.mode == "autonomous"
