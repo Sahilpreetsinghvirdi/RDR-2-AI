@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import cv2
+
 from src.config import AppConfig, ConfigError, DebugConfig
 from src.state.agent_status import AgentStatus
 from src.ui.dashboard import Dashboard
@@ -82,3 +87,52 @@ def test_dashboard_disabled_is_noop() -> None:
     dash.show(None, AgentStatus())
     assert dash.shown == 0
     assert dash.enabled is False
+
+
+def test_window_autosize_for_card(monkeypatch) -> None:
+    seen: dict[str, int] = {}
+    monkeypatch.setattr(
+        cv2, "namedWindow", lambda name, flags: seen.setdefault(name, flags)
+    )
+    monkeypatch.setattr(cv2, "imshow", lambda *args: None)
+    monkeypatch.setattr(cv2, "waitKey", lambda *args: None)
+    dash = Dashboard(DebugConfig(gui=True))
+    dash.show(None, AgentStatus(state="RUNNING"))
+    assert dash.shown == 1
+    assert seen == {"RDR2 AI - Debug": cv2.WINDOW_AUTOSIZE}
+
+
+def test_loop_hz_reports_real_rate(tmp_path: Path, monkeypatch) -> None:
+    from src.main import main
+    from tests.test_main_guard import FakeWindowManager
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "\n".join([
+            "telemetry:",
+            "  file: true",
+            f"  dir: {tmp_path.as_posix()}",
+            "  console: false",
+            "capture:",
+            "  backend: synthetic",
+            "  target_fps: 30",
+            "agent:",
+            "  loop_hz: 10",
+            "safety:",
+            "  hotkey_poll_hz: 100",
+            "  startup_grace_s: 1",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("src.main.GameWindowManager", FakeWindowManager)
+    assert main(["--config", str(cfg_path), "--headless", "--duration", "2"]) == 0
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "events.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    rates = [row["loop_hz"] for row in rows if row["kind"] == "metrics"]
+    assert rates, "no metrics emitted"
+    assert all(1.0 <= hz <= 50.0 for hz in rates), rates[-3:]

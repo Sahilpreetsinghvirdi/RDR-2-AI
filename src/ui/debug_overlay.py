@@ -174,8 +174,6 @@ _CARD_STYLE: dict[str, tuple[float, tuple[int, int, int]]] = {
 def _draw_card_text(canvas: np.ndarray, text: str, x: int, y: int,
                     scale: float, color: tuple[int, int, int]) -> None:
     cv2.putText(canvas, text, (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 2, cv2.LINE_AA)
-    cv2.putText(canvas, text, (x, y),
                 cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
 
 

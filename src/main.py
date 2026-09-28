@@ -475,6 +475,7 @@ def _agent_loop(
         guard = ComponentGuard()
     period = 1.0 / max(1.0, cfg.agent.loop_hz)
     hz = 0.0
+    prev_start: float | None = None
     window_seen = False
     last_pres: PerceptionResult | None = None
     next_metrics = time.monotonic() + cfg.telemetry.metrics_interval_s
@@ -540,8 +541,11 @@ def _agent_loop(
             )
 
         elapsed = time.perf_counter() - loop_start
-        rate = 1.0 / max(elapsed, 1e-6)
-        hz = rate if hz == 0.0 else 0.9 * hz + 0.1 * rate
+        tick = time.perf_counter()
+        if prev_start is not None and tick > prev_start:
+            rate = 1.0 / (tick - prev_start)
+            hz = rate if hz == 0.0 else 0.9 * hz + 0.1 * rate
+        prev_start = tick
         status.update(
             state=state.value,
             loop_hz=round(hz, 2),

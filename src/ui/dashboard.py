@@ -34,7 +34,8 @@ class Dashboard:
     def _ensure_window(self) -> None:
         if self._created:
             return
-        cv2.namedWindow(self._cfg.window_name, cv2.WINDOW_NORMAL)
+        flags = cv2.WINDOW_NORMAL if self._cfg.show_video else cv2.WINDOW_AUTOSIZE
+        cv2.namedWindow(self._cfg.window_name, flags)
         self._created = True
 
     def _panel(self, status: AgentStatus, height: int) -> np.ndarray:
