@@ -494,3 +494,62 @@ def test_key_task_accepts_raw_keys() -> None:
 def test_whistle_key_role_exists() -> None:
     assert ControlConfig().keys["whistle"] == "h"
     assert normalize_key("h").name == "h"
+
+
+def _lock_cfg(tmp_path: Path):
+    from src.config import load_config
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "\n".join([
+            "telemetry:",
+            "  file: true",
+            f"  dir: {tmp_path.as_posix()}",
+            "  console: false",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    return load_config(str(cfg_path))
+
+
+def test_pid_alive_checks_current_and_dead() -> None:
+    import os
+
+    from src.main import _pid_alive
+
+    assert _pid_alive(os.getpid()) is True
+    assert _pid_alive(99999999) is False
+
+
+def test_second_instance_refuses_to_start(tmp_path: Path) -> None:
+    from src.main import _claim_single_instance, _release_lock, main
+
+    cfg = _lock_cfg(tmp_path)
+    first = _claim_single_instance(cfg)
+    assert first is not None and first.is_file()
+    try:
+        assert _claim_single_instance(cfg) is None
+        rc = main(["--config", str(tmp_path / "config.yaml"),
+                   "--headless", "--duration", "1"])
+        assert rc == 3
+    finally:
+        _release_lock(first)
+    assert not first.is_file()
+    retaken = _claim_single_instance(cfg)
+    assert retaken is not None
+    _release_lock(retaken)
+
+
+def test_stale_lock_is_taken_over(tmp_path: Path) -> None:
+    import os
+
+    from src.main import _claim_single_instance
+
+    cfg = _lock_cfg(tmp_path)
+    lock = cfg.resolve(cfg.telemetry.dir) / "agent.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("99999999", encoding="utf-8")
+    claimed = _claim_single_instance(cfg)
+    assert claimed is not None
+    assert lock.read_text(encoding="utf-8").strip() == str(os.getpid())

@@ -626,6 +626,7 @@ hotkeys are never bypassed by later phases.
 | Symptom | Fix |
 |---------|-----|
 | Anything unexpected at startup | Run `.\Outlaw.ps1 -Doctor` first - it reports interpreter, dependencies, Tesseract, config and window status as PASS/WARN/FAIL. |
+| Second launch exits immediately | Only one agent runs at a time (lock file `logs/agent.lock`) - close the other one (F12 or X on its card) first. Double-clicking the shortcut twice will not start two Arthurs. |
 | `capture backend selected: mss` + slow fps | dxcam unavailable; reinstall `dxcam`, run as the same user as the desktop session. |
 | Frames are 0, log says `waiting_for_window` | RDR2 Story Mode is not running, or the window title is not exactly a `window.title_patterns` entry (`window.match: exact` by default). Check `.\calibrate.ps1 -Inspect`. |
 | Colors look swapped in saved frames | Set `capture.color_order` explicitly (`bgr`/`rgb`); dxcam delivers RGB, mss delivers BGRA. |

@@ -7,11 +7,14 @@ Closed loop: capture -> fast vision + HUD/world perception (OCR when available)
 from __future__ import annotations
 
 import argparse
+import ctypes
 import logging
+import os
 import sys
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from src import __version__
 from src.ai.brain import BrainPlanner
@@ -765,6 +768,58 @@ def _say(*args: object, **kwargs: object) -> None:
         pass
 
 
+def _read_lock_pid(path: Path) -> int | None:
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        kernel32.CloseHandle(handle)
+        return True
+    except Exception:
+        return False
+
+
+def _claim_single_instance(cfg: AppConfig) -> Path | None:
+    """Claim the agent lock file; None when another live instance holds it."""
+    path = cfg.resolve(cfg.telemetry.dir) / "agent.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x") as handle:
+            handle.write(str(os.getpid()))
+        return path
+    except FileExistsError:
+        pass
+    incumbent = _read_lock_pid(path)
+    if incumbent is None:
+        time.sleep(0.5)
+        incumbent = _read_lock_pid(path)
+    if incumbent is not None and _pid_alive(incumbent):
+        return None
+    try:
+        path.write_text(str(os.getpid()), encoding="utf-8")
+    except OSError:
+        pass
+    return path
+
+
+def _release_lock(path: Path) -> None:
+    try:
+        if path.is_file() and path.read_text(encoding="utf-8").strip() == str(
+            os.getpid()
+        ):
+            path.unlink()
+    except OSError:
+        pass
+
+
 def _apply_interactive_choice(cfg: AppConfig) -> None:
     """NOTES Mode 2: console picker over missions, free roam, or observe."""
     missions = [p for p in cfg.story.missions if isinstance(p, dict)]
@@ -814,6 +869,15 @@ def main(argv: list[str] | None = None) -> int:
         _say(f"config error: {exc}", file=sys.stderr)
         return 2
 
+    lock_path = _claim_single_instance(cfg)
+    if lock_path is None:
+        _say(
+            "another Outlaw agent is already running - "
+            "not starting a second one",
+            file=sys.stderr,
+        )
+        return 3
+
     enable_dpi_awareness()
     log_path = setup_logging(cfg.telemetry)
     for warning in cfg.warnings:
@@ -833,13 +897,16 @@ def main(argv: list[str] | None = None) -> int:
         cfg.safety.emergency_key, cfg.safety.pause_key, cfg.safety.takeover_key,
     )
     try:
-        return run_agent(cfg, args)
-    except ConfigError as exc:
-        log.error("config error: %s", exc)
-        return 2
-    except KeyboardInterrupt:
-        log.warning("interrupted before startup completed")
-        return 130
+        try:
+            return run_agent(cfg, args)
+        except ConfigError as exc:
+            log.error("config error: %s", exc)
+            return 2
+        except KeyboardInterrupt:
+            log.warning("interrupted before startup completed")
+            return 130
+    finally:
+        _release_lock(lock_path)
 
 
 if __name__ == "__main__":
