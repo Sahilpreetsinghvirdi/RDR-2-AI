@@ -62,8 +62,10 @@ def apply_arrow_cursor(window_name: str) -> bool:
         arrow = user32.LoadCursorW(None, _IDC_ARROW)
         if not arrow:
             return False
-        user32.SetClassLongW(hwnd, _GCL_HCURSOR, arrow)
-        return True
+        set_class_long = getattr(user32, "SetClassLongPtrW", None)
+        if set_class_long is None:
+            return False
+        return bool(set_class_long(hwnd, _GCL_HCURSOR, arrow))
     except Exception:
         return False
 
