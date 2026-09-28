@@ -57,11 +57,16 @@ class LocomotionController:
         if sprint:
             keys.append(self._cfg.keys["sprint"])
         self.stop()
+        held: list[str] = []
         ok = True
         for key in keys:
-            ok = self._input.key_down(key) and ok
+            if self._input.key_down(key):
+                held.append(key)
+            else:
+                ok = False
         if not ok:
-            self.stop()
+            for key in held:
+                self._input.key_up(key)
             return False
         self._active_keys = tuple(keys)
         self._deadline = time.monotonic() + duration

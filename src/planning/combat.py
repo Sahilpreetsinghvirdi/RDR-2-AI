@@ -123,13 +123,14 @@ class CombatPlanner:
         self._engaged = False
         self._calm_since = None
         log.info("combat: threat clear, standing down")
-        status.update(action="none")
+        status.update(goal=f"IDLE (phase {status.phase})", action="none")
 
     def _aim(self, now: float, state: GameState) -> bool:
         if now < self._next_aim:
             return False
         offset = state.threat.enemy_offset
         if not offset or not state.threat.enemies_detected:
+            self._next_aim = now + self._cfg.aim_interval_s
             return False
         dx, dy = offset[0], offset[1]
         self._next_aim = now + self._cfg.aim_interval_s

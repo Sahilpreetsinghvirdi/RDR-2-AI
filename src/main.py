@@ -77,6 +77,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--mission", action="store_true",
         help="run the configured mission task list (Phase 5)",
     )
+    parser.add_argument(
+        "--story", action="store_true",
+        help="run the story mode director over story.missions (Mode 1)",
+    )
     parser.add_argument("--headless", action="store_true", help="disable the debug window")
     parser.add_argument("--record", action="store_true", help="record frames to disk")
     parser.add_argument(
@@ -103,6 +107,9 @@ def _apply_cli_overrides(cfg: AppConfig, args: argparse.Namespace) -> None:
         cfg.validate()
     if args.mission:
         cfg.mission.enabled = True
+        cfg.validate()
+    if args.story:
+        cfg.story.enabled = True
         cfg.validate()
 
 
@@ -263,7 +270,10 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
                     "loop_hz": cfg.agent.loop_hz,
                     "phase": cfg.agent.phase,
                     "demo": bool(args.demo),
-                    "autopilot": bool(cfg.control.enabled or cfg.mission.enabled),
+                    "autopilot": bool(
+                        cfg.control.enabled or cfg.mission.enabled
+                        or cfg.story.enabled or cfg.rl.enabled
+                    ),
                 }
             )
         if cfg.debug.gui:
@@ -586,6 +596,11 @@ def _run_active_work(
         return None
     if not info.focused:
         _halt_drivers(locomotion, combat, survival, policy_planner, game_state)
+        status.update(
+            action="none",
+            message="waiting for the game window to be focused",
+        )
+        return None
 
     result = fast.process(packet.image)
     pres = perception.process(packet.image, packet.frame_id)
@@ -613,7 +628,8 @@ def _run_active_work(
         hud_dead_eye=gauges["dead_eye"].value if "dead_eye" in gauges else None,
         hud_minimap=minimap.present if minimap is not None else None,
         hud_prompt_visible=prompt_visible,
-        hud_prompt=perception.last_prompt,
+        hud_prompt=pres.prompt_text or "",
+        confidence=round(game_state.confidence.overall, 3),
         hud_boxes=boxes,
         hud_labels=labels,
         hud_ms=round(pres.latency_ms, 2),
@@ -684,7 +700,7 @@ def _run_active_work(
                        game_state)
 
     if recorder is not None:
-        recorder.record(packet, status.to_dict())
+        recorder.record(packet, status.snapshot().to_dict())
     return pres
 
 

@@ -152,6 +152,7 @@ class SurvivalPlanner:
         remedy = remedy_map.get(name)
         if remedy is None:
             self.abort()
+            state.survival.active_remedy = None
             return False
 
         if self._cfg.require_clear and state.threat.level != "none":

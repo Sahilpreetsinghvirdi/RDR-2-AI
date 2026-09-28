@@ -118,6 +118,8 @@ class Perception:
                         match = _AMMO_RE.search(text)
                         if match:
                             self._ammo = int(match.group())
+            elif weapon is not None:
+                self._ammo = None
         if dialogue.present and self._cfg.dialogue.enabled and self._ocr.available:
             self._dlg_counter += 1
             if self._dlg_counter % self._dlg_every == 0:
@@ -134,6 +136,11 @@ class Perception:
             self._dlg_counter = 0
             self._last_dialogue_text = ""
         result.prompt_text = self._last_prompt or None
+        prompt_visible = (
+            result.hud.prompt is not None and result.hud.prompt.present
+        )
+        if not prompt_visible:
+            result.prompt_text = None
         result.dialogue.text = self._last_dialogue_text or None
         result.encounter = self._match_encounter(result)
         result.ammo = self._ammo
@@ -200,10 +207,13 @@ class Perception:
             state.mission.objective_text = None
             state.mission.active = False
 
-        if hud.wanted is not None and hud.wanted.value:
-            state.threat.wanted_level = int(hud.wanted.value)
-            state.threat.level = "wanted"
-            state.confidence.combat = hud.wanted.confidence
+        if hud.wanted is not None:
+            if hud.wanted.value:
+                state.threat.wanted_level = int(hud.wanted.value)
+                state.threat.level = "wanted"
+                state.confidence.combat = hud.wanted.confidence
+            else:
+                state.threat.wanted_level = 0
 
         self._apply_world(state, result)
 
@@ -239,6 +249,13 @@ class Perception:
             state.threat.enemy_offset = (
                 minimap.enemy_offset if minimap.enemy_dots else None
             )
+            if minimap.marker_present:
+                state.mission.objective_location_estimate = (
+                    list(minimap.marker_offset)
+                    if minimap.marker_offset else None
+                )
+            else:
+                state.mission.objective_location_estimate = None
 
         sky = world.sky
         if sky is not None and sky.present and sky.time_of_day:
@@ -246,17 +263,22 @@ class Perception:
             env.weather = sky.weather
 
         weapon = world.weapon
-        if weapon is not None and weapon.ammo is not None:
+        if weapon is not None:
             state.player.weapon_ammo = weapon.ammo
 
         horse = world.horse
-        if horse is not None and horse.detected:
-            state.horse.detected = True
-            if horse.health is not None:
-                state.horse.health = horse.health
-            if horse.stamina is not None:
-                state.horse.stamina = horse.stamina
-            state.confidence.horse = horse.confidence
+        if horse is not None:
+            if horse.detected:
+                state.horse.detected = True
+                if horse.health is not None:
+                    state.horse.health = horse.health
+                if horse.stamina is not None:
+                    state.horse.stamina = horse.stamina
+                state.confidence.horse = horse.confidence
+            else:
+                state.horse.detected = False
+                state.horse.health = None
+                state.horse.stamina = None
 
 
 def hud_summary(result: PerceptionResult) -> dict[str, object]:

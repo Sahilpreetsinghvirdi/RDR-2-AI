@@ -26,12 +26,24 @@ class FakeLocomotion:
     def __init__(self) -> None:
         self.stops = 0
         self.ticks = 0
+        self.taps: list[str] = []
+        self.tap_ok = True
+        self.turns: list[float] = []
+        self.turn_ok = True
 
     def stop(self) -> None:
         self.stops += 1
 
     def tick(self) -> None:
         self.ticks += 1
+
+    def tap(self, role: str) -> bool:
+        self.taps.append(role)
+        return self.tap_ok
+
+    def turn(self, degrees: float) -> bool:
+        self.turns.append(degrees)
+        return self.turn_ok
 
 
 class FakeRoute:
@@ -45,7 +57,14 @@ class FakeRoute:
         self.failed = False
         self.current = "leg 1/1"
         self.legs: list[tuple[float, float]] = []
+        self.heading = 0.0
+        self.nudges: list[float] = []
+        self.control_arg = args[0] if args else None
         FakeRoute.instances.append(self)
+
+    def nudge_heading(self, delta_deg: float) -> None:
+        self.nudges.append(delta_deg)
+        self.heading += delta_deg
 
     def set_legs(self, legs: list[tuple[float, float]]) -> None:
         self.legs = list(legs)
@@ -325,3 +344,180 @@ def test_done_runner_parks_status() -> None:
     snap = status.snapshot()
     assert snap.goal == "STORY DONE"
     assert snap.action == "none"
+
+
+def test_story_rejects_bad_kind() -> None:
+    cfg = AppConfig()
+    cfg.story = _story_cfg(missions=[{"name": "x", "kind": "epic"}])
+    with pytest.raises(ConfigError, match=r"kind must be story\|stranger"):
+        cfg.validate()
+
+
+def test_story_rejects_non_bool_mount_flag() -> None:
+    cfg = AppConfig()
+    cfg.story = _story_cfg(missions=[{"name": "x", "mount": "yes"}])
+    with pytest.raises(ConfigError, match=r"\.mount must be a boolean"):
+        cfg.validate()
+
+
+def test_bad_profile_keeps_pending_begin() -> None:
+    runner = _runner(_story_cfg(missions=[{"name": "x", "legs": [["bogus"]]}]))
+    with pytest.raises((ValueError, TypeError)):
+        runner.step(0.0, _status())
+    assert runner._pending_begin is True  # noqa: SLF001 - white-box retry check
+
+
+def test_mount_whistles_boards_and_rides_mounted() -> None:
+    cfg = _story_cfg(
+        mount_wait_s=0.1,
+        missions=[{"name": "ride", "mount": True, "legs": [[0.0, 10.0]]}],
+    )
+    loco = FakeLocomotion()
+    runner = StoryRunner(cfg, ControlConfig(), loco)  # type: ignore[arg-type]
+    status = _status()
+    state = GameState()
+
+    runner.step(0.0, status, None, state)
+    assert runner.stage == "mount"
+    assert loco.taps == ["whistle"]
+
+    state.dialogue.encounter = "mount"
+    runner.step(0.1, status, None, state)
+    assert loco.taps == ["whistle", "interact"]
+    assert runner.stage == "mount"
+
+    runner.step(0.3, status, None, state)
+    assert runner.stage == "travel"
+    runner.step(0.4, status, None, state)
+    assert FakeRoute.instances, "route was not built after mounting"
+    mounted_nav = FakeRoute.instances[-1].control_arg.nav
+    assert mounted_nav.walk_speed_mps == pytest.approx(cfg.mounted_speed_mps)
+
+
+def test_mount_timeout_continues_on_foot() -> None:
+    cfg = _story_cfg(
+        mount_timeout_s=0.2,
+        missions=[{"name": "walk", "mount": True, "legs": [[0.0, 10.0]]}],
+    )
+    loco = FakeLocomotion()
+    runner = StoryRunner(cfg, ControlConfig(), loco)  # type: ignore[arg-type]
+    status = _status()
+    state = GameState()
+    runner.step(0.0, status, None, state)
+    assert loco.taps == ["whistle"]
+    runner.step(0.5, status, None, state)
+    assert runner.stage == "travel"
+    runner.step(0.6, status, None, state)
+    plain_nav = FakeRoute.instances[-1].control_arg.nav
+    assert plain_nav.walk_speed_mps == pytest.approx(1.6)
+
+
+def test_mount_whistle_refused_continues() -> None:
+    cfg = _story_cfg(missions=[{"name": "walk", "mount": True}])
+    loco = FakeLocomotion()
+    loco.tap_ok = False
+    runner = StoryRunner(cfg, ControlConfig(), loco)  # type: ignore[arg-type]
+    runner.step(0.0, _status())
+    assert runner.stage == "complete"
+    assert loco.taps == ["whistle"]
+
+
+def test_seek_nudges_toward_persistent_marker() -> None:
+    cfg = _story_cfg(
+        marker_persist_frames=2,
+        missions=[{"name": "seek", "legs": [[0.0, 50.0]], "seek_marker": True}],
+    )
+    FakeRoute.arrive_after = 10_000
+    loco = FakeLocomotion()
+    runner = StoryRunner(cfg, ControlConfig(), loco)  # type: ignore[arg-type]
+    status = _status()
+    state = GameState()
+    state.mission.objective_location_estimate = [0.3, -0.3]
+    runner.step(0.0, status, None, state)
+    assert FakeRoute.instances[-1].nudges == []
+    runner.step(0.1, status, None, state)
+    nudges = FakeRoute.instances[-1].nudges
+    assert nudges == [pytest.approx(30.0)]
+    assert loco.turns == [pytest.approx(30.0)]
+
+
+def test_seek_ignores_centered_marker() -> None:
+    cfg = _story_cfg(
+        marker_persist_frames=1,
+        missions=[{"name": "seek", "legs": [[0.0, 50.0]], "seek_marker": True}],
+    )
+    FakeRoute.arrive_after = 10_000
+    loco = FakeLocomotion()
+    runner = StoryRunner(cfg, ControlConfig(), loco)  # type: ignore[arg-type]
+    state = GameState()
+    state.mission.objective_location_estimate = [0.0, -0.4]
+    runner.step(0.0, _status(), None, state)
+    assert FakeRoute.instances[-1].nudges == []
+    assert loco.turns == []
+
+
+def test_seek_resets_when_marker_lost() -> None:
+    cfg = _story_cfg(
+        marker_persist_frames=1,
+        missions=[{"name": "seek", "legs": [[0.0, 50.0]], "seek_marker": True}],
+    )
+    FakeRoute.arrive_after = 10_000
+    loco = FakeLocomotion()
+    runner = StoryRunner(cfg, ControlConfig(), loco)  # type: ignore[arg-type]
+    status = _status()
+    state = GameState()
+    state.mission.objective_location_estimate = [0.4, -0.1]
+    runner.step(0.0, status, None, state)
+    assert len(FakeRoute.instances[-1].nudges) == 1
+    state.mission.objective_location_estimate = None
+    runner.step(0.1, status, None, state)
+    assert len(FakeRoute.instances[-1].nudges) == 1
+    assert runner._marker_frames == 0  # noqa: SLF001 - white-box reset check
+
+
+def _stranger_cfg(**kwargs: object) -> StoryConfig:
+    base: dict[str, object] = {
+        "enabled": True,
+        "pause_grace_s": 3600.0,
+        "missions": [
+            {"name": "story-a", "legs": [[0.0, 5.0]]},
+            {"name": "stranger-b", "kind": "stranger", "legs": [[0.0, 5.0]]},
+            {"name": "story-c", "legs": [[0.0, 5.0]]},
+        ],
+    }
+    base.update(kwargs)
+    return StoryConfig(**base)  # type: ignore[arg-type]
+
+
+def test_opportunistic_detour_and_resume() -> None:
+    runner = _runner(_stranger_cfg())
+    status = _status()
+    state = GameState()
+    state.mission.objective_location_estimate = [0.2, -0.2]
+
+    runner.step(0.0, status, None, state)
+    assert runner.index == 1
+    runner.step(0.1, status, None, state)
+    assert runner.stage == "complete"
+
+    state.mission.prompt_text = "mission passed"
+    state.mission.objective_location_estimate = None
+    runner.step(0.2, status, None, state)
+    assert runner.index == 0
+    runner.step(0.3, status, None, state)
+    assert runner.index == 0
+    assert runner.stage == "complete"
+
+
+def test_no_detour_when_opportunistic_off() -> None:
+    runner = _runner(_stranger_cfg(opportunistic=False))
+    state = GameState()
+    state.mission.objective_location_estimate = [0.2, -0.2]
+    runner.step(0.0, _status(), None, state)
+    assert runner.index == 0
+
+
+def test_no_detour_without_marker() -> None:
+    runner = _runner(_stranger_cfg())
+    runner.step(0.0, _status(), None, GameState())
+    assert runner.index == 0

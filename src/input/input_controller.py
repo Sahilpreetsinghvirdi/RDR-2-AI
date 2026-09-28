@@ -127,7 +127,7 @@ class InputController:
             latency = time.perf_counter() - t0
             if ok:
                 self._held_keys[resolved.name] = resolved
-        return self._finish(ok, latency, f"key_down:{resolved.name}")
+            return self._finish(ok, latency, f"key_down:{resolved.name}")
 
     def key_up(self, key: str | int | Key) -> bool:
         resolved = normalize_key(key)
@@ -136,13 +136,13 @@ class InputController:
             ok = self._keyboard.up(resolved)
             latency = time.perf_counter() - t0
             self._held_keys.pop(resolved.name, None)
-        if ok:
-            self.stats.sent += 1
-            self.stats.last_latency_ms = latency * 1000.0
-            self._record(f"key_up:{resolved.name}")
-            return True
-        self.stats.failed += 1
-        return False
+            if ok:
+                self.stats.sent += 1
+                self.stats.last_latency_ms = latency * 1000.0
+                self._record(f"key_up:{resolved.name}")
+                return True
+            self.stats.failed += 1
+            return False
 
     def press(self, key: str | int | Key, hold_ms: int | None = None) -> bool:
         duration = self._cfg.default_hold_ms if hold_ms is None else max(0, int(hold_ms))
@@ -171,7 +171,12 @@ class InputController:
                 return True
             if self._stop is not None and self._stop.is_set():
                 return False
-            if not self._allow():
+            try:
+                allowed = self._allow()
+            except Exception:
+                log.exception("input guard raised")
+                return False
+            if not allowed:
                 return False
             time.sleep(min(slice_s, deadline - now))
 
@@ -182,7 +187,7 @@ class InputController:
             t0 = time.perf_counter()
             ok = self._mouse.move(int(dx), int(dy))
             latency = time.perf_counter() - t0
-        return self._finish(ok, latency, f"mouse_move:{int(dx)},{int(dy)}")
+            return self._finish(ok, latency, f"mouse_move:{int(dx)},{int(dy)}")
 
     def mouse_down(self, button: str = "left") -> bool:
         if not self._prepare():
@@ -194,7 +199,7 @@ class InputController:
             latency = time.perf_counter() - t0
             if ok:
                 self._held_buttons[name] = None
-        return self._finish(ok, latency, f"mouse_down:{name}")
+            return self._finish(ok, latency, f"mouse_down:{name}")
 
     def mouse_up(self, button: str = "left") -> bool:
         name = normalize_button(button)
@@ -203,13 +208,13 @@ class InputController:
             ok = self._mouse.button_up(name)
             latency = time.perf_counter() - t0
             self._held_buttons.pop(name, None)
-        if ok:
-            self.stats.sent += 1
-            self.stats.last_latency_ms = latency * 1000.0
-            self._record(f"mouse_up:{name}")
-            return True
-        self.stats.failed += 1
-        return False
+            if ok:
+                self.stats.sent += 1
+                self.stats.last_latency_ms = latency * 1000.0
+                self._record(f"mouse_up:{name}")
+                return True
+            self.stats.failed += 1
+            return False
 
     def mouse_click(self, button: str = "left", hold_ms: int | None = None) -> bool:
         duration = self._cfg.click_hold_ms if hold_ms is None else max(0, int(hold_ms))
@@ -227,7 +232,7 @@ class InputController:
             t0 = time.perf_counter()
             ok = self._mouse.wheel(int(delta))
             latency = time.perf_counter() - t0
-        return self._finish(ok, latency, f"mouse_wheel:{int(delta)}")
+            return self._finish(ok, latency, f"mouse_wheel:{int(delta)}")
 
     def controller_button_down(self, button: str) -> bool:
         if not self._prepare():
@@ -244,31 +249,63 @@ class InputController:
 
     def release_all(self) -> None:
         """Release everything the AI is holding. Never blocked by the guard."""
-        if not self._lock.acquire(timeout=0.5):
-            log.error("release_all could not acquire the input lock")
-            return
+        if self._lock.acquire(timeout=0.5):
+            try:
+                self._release_held()
+            finally:
+                self._lock.release()
+        else:
+            log.error("release_all could not acquire the input lock - best effort")
+            self._release_held_best_effort()
+
+    def _release_held(self) -> None:
+        released: list[str] = []
+        for name, key in list(self._held_keys.items()):
+            try:
+                if self._keyboard.up(key):
+                    released.append(name)
+            except Exception:
+                log.exception("failed to release key '%s'", name)
+            self._held_keys.pop(name, None)
+        for name in list(self._held_buttons):
+            try:
+                if self._mouse.button_up(name):
+                    released.append(name)
+            except Exception:
+                log.exception("failed to release mouse button '%s'", name)
+            self._held_buttons.pop(name, None)
+        if released:
+            self.stats.released += len(released)
+            self._record("release_all:" + ",".join(released))
+            log.warning("released held inputs: %s", ", ".join(released))
+
+    def _release_held_best_effort(self) -> None:
         try:
-            released: list[str] = []
-            for name, key in list(self._held_keys.items()):
-                try:
-                    if self._keyboard.up(key):
-                        released.append(name)
-                except Exception:
-                    log.exception("failed to release key '%s'", name)
+            keys = list(self._held_keys.items())
+        except RuntimeError:
+            keys = []
+        for name, key in keys:
+            try:
+                self._keyboard.up(key)
+            except Exception:
+                log.exception("failed to release key '%s'", name)
+            try:
                 self._held_keys.pop(name, None)
-            for name in list(self._held_buttons):
-                try:
-                    if self._mouse.button_up(name):
-                        released.append(name)
-                except Exception:
-                    log.exception("failed to release mouse button '%s'", name)
+            except RuntimeError:
+                pass
+        try:
+            buttons = list(self._held_buttons)
+        except RuntimeError:
+            buttons = []
+        for name in buttons:
+            try:
+                self._mouse.button_up(name)
+            except Exception:
+                log.exception("failed to release mouse button '%s'", name)
+            try:
                 self._held_buttons.pop(name, None)
-            if released:
-                self.stats.released += len(released)
-                self._record("release_all:" + ",".join(released))
-                log.warning("released held inputs: %s", ", ".join(released))
-        finally:
-            self._lock.release()
+            except RuntimeError:
+                pass
 
     def snapshot(self) -> dict[str, object]:
         return {

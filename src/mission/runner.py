@@ -119,11 +119,12 @@ class MissionRunner:
                 self._advance()
         elif task.kind == "wait_for":
             self._step_wait_for(task, now, status, goal, game_state)
-        elif task.kind == "interact":
+        elif task.kind == "interact" or task.kind == "key":
+            role = "interact" if task.kind == "interact" else task.key
             if not self._interact_done:
-                ok = self._locomotion.tap("interact")
+                ok = self._locomotion.tap(role)
                 if not ok:
-                    self._fail(f"task {self._index + 1}: interact key refused")
+                    self._fail(f"task {self._index + 1}: {role} key refused")
                     status.update(goal="MISSION FAILED", action="none", message=self._failed)
                     return
                 self._interact_done = True
@@ -164,9 +165,9 @@ class MissionRunner:
             -self._control.max_turn_deg_per_tick,
             min(remaining, self._control.max_turn_deg_per_tick),
         )
-        self._locomotion.turn(applied)
-        self._heading += applied
-        self._turn_remaining = remaining - applied
+        if self._locomotion.turn(applied):
+            self._heading += applied
+            self._turn_remaining = remaining - applied
         status.update(goal=goal, action=f"turn:{remaining:+.0f}deg")
         if abs(self._turn_remaining) <= _TURN_EPS:
             self._advance()

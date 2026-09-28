@@ -28,6 +28,7 @@ Scope notes from the original list:
 | Sprint | `control.keys.sprint` | `shift` | Sprint / Run / Increase speed = Shift |
 | Jump | `control.keys.jump` | `space` | Jump = Space-bar |
 | Interact / Use | `control.keys.interact` | `e` | Interact with object / Use = E |
+| Horse whistle | `control.keys.whistle` | `h` | Whistle for horse = H |
 | Camera turn | mouse move (no key) | dx px | Look = mouse (implicit in list) |
 | Aim | mouse right button | RMB | Aim = Right mouse button |
 | Fire | mouse left button | LMB | Attack / Fire weapon = Left mouse button |

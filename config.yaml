@@ -71,6 +71,7 @@ control:
     sprint: shift
     jump: space
     interact: e
+    whistle: h                # horse whistle (H)
   mouse_px_per_degree: 12.0    # camera look sensitivity (raise for fast flicks)
   max_turn_deg_per_tick: 30.0  # hard cap on camera turn per control tick
   min_step_s: 0.1              # shortest single move command

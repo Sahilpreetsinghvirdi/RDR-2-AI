@@ -1,10 +1,15 @@
 """Story mode director: runs configured missions end to end (NOTES Mode 1).
 
-Episode stages per mission: travel (:class:`RoutePlanner` legs) -> objective
-(:class:`MissionRunner` tasks) -> complete (completion-keyword watch) -> next
-mission. Failures and stage timeouts skip forward instead of parking the
-session; the combat/survival gates in the main loop simply pause the director
-and the pause-aware stage timers do not count that time.
+Episode stages per mission: mount (optional whistle-and-ride) -> travel
+(:class:`RoutePlanner` legs, optionally homing toward a minimap marker) ->
+objective (:class:`MissionRunner` tasks) -> complete (completion-keyword
+watch) -> next mission. Failures and stage timeouts skip forward instead of
+parking the session; the combat/survival gates in the main loop simply pause
+the director and the pause-aware stage timers do not count that time.
+
+Stranger (side) missions declare ``kind: stranger``; with
+``story.opportunistic`` the director detours to one when its marker is
+visible, then resumes the story mission it left.
 
 Honor is handled outside this class: ``story.auto_greet`` arms the existing
 prompt responder to greet on every opportunity (the honor value itself is not
@@ -14,6 +19,8 @@ readable from the HUD).
 from __future__ import annotations
 
 import logging
+import math
+from dataclasses import replace
 
 import numpy as np
 
@@ -27,7 +34,7 @@ from src.vision.ocr import OcrEngine
 
 log = logging.getLogger(__name__)
 
-_STAGES = ("travel", "objective", "complete", "done")
+_STAGES = ("mount", "travel", "objective", "complete", "done")
 
 
 class StoryRunner:
@@ -62,6 +69,11 @@ class StoryRunner:
         self._banner_counter = 0
         self._round = 0
         self._note = ""
+        self._mounted: ControlConfig | None = None
+        self._detour_from: int | None = None
+        self._marker_frames = 0
+        self._mount_whistled = False
+        self._mount_settle_until = 0.0
         if not self._profiles:
             self._stage = "done"
             self._note = "no story missions configured"
@@ -97,9 +109,11 @@ class StoryRunner:
             status.update(goal="STORY DONE", action="none", message=self._note)
             return
         if self._pending_begin:
-            self._begin_current(now)
-        if self._stage == "travel":
-            self._step_travel(now, status, frame)
+            self._begin_current(now, game_state)
+        if self._stage == "mount":
+            self._step_mount(now, status, game_state)
+        elif self._stage == "travel":
+            self._step_travel(now, status, frame, game_state)
         elif self._stage == "objective":
             self._step_objective(now, status, frame, game_state)
         elif self._stage == "complete":
@@ -111,44 +125,131 @@ class StoryRunner:
                 message=self._name,
             )
 
-    def _begin_current(self, now: float) -> None:
-        self._pending_begin = False
+    @property
+    def _driver_control(self) -> ControlConfig:
+        return self._mounted if self._mounted is not None else self._control
+
+    def _begin_current(self, now: float, game_state: GameState | None) -> None:
         self._locomotion.stop()
         self._route = None
         self._mission = None
+        self._mounted = None
+        self._marker_frames = 0
+        self._mount_whistled = False
+        self._mount_settle_until = 0.0
+        detour = self._opportunistic_target(game_state)
+        if detour is not None:
+            self._detour_from = self._index
+            self._index = detour
+            log.info(
+                "story: opportunistic detour to stranger mission %d/%d",
+                detour + 1, len(self._profiles),
+            )
         profile = self._profiles[self._index]
         self._name = str(profile.get("name") or f"mission {self._index + 1}")
-        self._legs = [
-            (float(leg[0]), float(leg[1]))
-            for leg in (profile.get("legs") or [])
-            if isinstance(leg, (list, tuple)) and len(leg) == 2
-        ]
+        parsed_legs: list[tuple[float, float]] = []
+        for leg in profile.get("legs") or []:
+            if not isinstance(leg, (list, tuple)) or len(leg) != 2:
+                raise ValueError(
+                    f"story profile {self._name!r}: bad leg {leg!r}"
+                )
+            parsed_legs.append((float(leg[0]), float(leg[1])))
+        self._legs = parsed_legs
         raw_tasks = profile.get("tasks") or []
         self._tasks = [t for t in raw_tasks if isinstance(t, dict)]
+        if profile.get("mount"):
+            self._goto("mount", now)
+        else:
+            self._after_mount(now)
+        log.info(
+            "story: mission %d/%d '%s' - stage %s (%d legs, %d tasks)",
+            self._index + 1, len(self._profiles), self._name, self._stage,
+            len(self._legs), len(self._tasks),
+        )
+        self._pending_begin = False
+
+    def _opportunistic_target(self, game_state: GameState | None) -> int | None:
+        """Later stranger profile to detour to when its marker is visible."""
+        if not self._cfg.opportunistic or game_state is None:
+            return None
+        current = self._profiles[self._index]
+        if current.get("kind", "story") == "stranger":
+            return None
+        if game_state.mission.objective_location_estimate is None:
+            return None
+        for i in range(self._index + 1, len(self._profiles)):
+            if self._profiles[i].get("kind", "story") == "stranger":
+                return i
+        return None
+
+    def _after_mount(self, now: float) -> None:
+        self._locomotion.stop()
         if self._legs:
             self._goto("travel", now)
         elif self._tasks:
             self._goto("objective", now)
         else:
             self._goto("complete", now)
-        log.info(
-            "story: mission %d/%d '%s' - stage %s (%d legs, %d tasks)",
-            self._index + 1, len(self._profiles), self._name, self._stage,
-            len(self._legs), len(self._tasks),
-        )
+        log.info("story: mission '%s' - stage %s", self._name, self._stage)
 
     def _goto(self, stage: str, now: float) -> None:
         self._stage = stage
         self._stage_started = now
         self._banner_counter = 0
 
-    def _step_travel(self, now: float, status: StatusTracker,
-                     frame: np.ndarray | None) -> None:
+    def _step_mount(
+        self, now: float, status: StatusTracker, game_state: GameState | None
+    ) -> None:
+        if self._mount_settle_until and now >= self._mount_settle_until:
+            self._finish_mount(now)
+            return
+        encounter = (
+            game_state.dialogue.encounter if game_state is not None else None
+        )
+        if encounter == "mount" and not self._mount_settle_until:
+            if self._locomotion.tap("interact"):
+                self._mount_settle_until = now + self._cfg.mount_wait_s
+                status.update(action="mount:board")
+            else:
+                log.warning("story: mount tap refused - continuing on foot")
+                self._after_mount(now)
+            return
+        if not self._mount_whistled:
+            self._mount_whistled = True
+            if self._locomotion.tap("whistle"):
+                status.update(action="mount:whistle")
+            else:
+                log.warning("story: whistle refused - continuing on foot")
+                self._after_mount(now)
+            return
+        if now - self._stage_started >= self._cfg.mount_timeout_s:
+            log.warning("story: horse never came - continuing on foot")
+            self._after_mount(now)
+            return
+        status.update(action="mount:wait")
+
+    def _finish_mount(self, now: float) -> None:
+        self._mounted = replace(
+            self._control,
+            nav=replace(
+                self._control.nav, walk_speed_mps=self._cfg.mounted_speed_mps
+            ),
+        )
+        log.info(
+            "story: mounted - riding at %.1f m/s", self._cfg.mounted_speed_mps
+        )
+        self._after_mount(now)
+
+    def _step_travel(
+        self, now: float, status: StatusTracker,
+        frame: np.ndarray | None, game_state: GameState | None,
+    ) -> None:
         if self._route is None:
             self._route = RoutePlanner(
-                self._control, self._locomotion, self._minimap_frac
+                self._driver_control, self._locomotion, self._minimap_frac
             )
             self._route.set_legs(self._legs)
+        self._apply_seek_correction(status, game_state)
         self._route.step(now, status, frame)
         if self._route.failed:
             self._fail_advance(f"route blocked ({self._route.current})", now)
@@ -166,6 +267,35 @@ class StoryRunner:
                 f"travel timed out after {self._cfg.travel_timeout_s:.0f}s", now
             )
 
+    def _apply_seek_correction(
+        self, status: StatusTracker, game_state: GameState | None
+    ) -> None:
+        """Nudge the route heading toward a persistent minimap marker."""
+        profile = self._profiles[self._index]
+        if not profile.get("seek_marker") or self._route is None:
+            self._marker_frames = 0
+            return
+        estimate = (
+            game_state.mission.objective_location_estimate
+            if game_state is not None else None
+        )
+        if not estimate or len(estimate) != 2:
+            self._marker_frames = 0
+            return
+        self._marker_frames += 1
+        if self._marker_frames < self._cfg.marker_persist_frames:
+            return
+        dx, dy = float(estimate[0]), float(estimate[1])
+        angle = math.degrees(math.atan2(dx, -dy))
+        nav = self._driver_control.nav
+        if abs(angle) <= nav.heading_tol_deg:
+            return
+        cap = self._driver_control.max_turn_deg_per_tick
+        delta = max(-cap, min(angle, cap))
+        if self._locomotion.turn(delta):
+            self._route.nudge_heading(delta)
+            status.update(action=f"seek:{angle:+.0f}deg")
+
     def _step_objective(
         self,
         now: float,
@@ -176,7 +306,7 @@ class StoryRunner:
         if self._mission is None:
             self._mission = MissionRunner(
                 MissionConfig(enabled=True, loop=False, tasks=list(self._tasks)),
-                self._control,
+                self._driver_control,
                 self._locomotion,
                 self._minimap_frac,
             )
@@ -271,7 +401,20 @@ class StoryRunner:
             "story: mission %d/%d '%s' - %s",
             self._index + 1, len(self._profiles), self._name, reason,
         )
+        finished = self._profiles[self._index]
         self._index += 1
+        if (
+            finished.get("kind", "story") == "stranger"
+            and self._detour_from is not None
+        ):
+            self._index = self._detour_from
+            self._detour_from = None
+            log.info(
+                "story: detour complete - resuming mission %d/%d",
+                self._index + 1, len(self._profiles),
+            )
+            self._pending_begin = True
+            return
         if self._index >= len(self._profiles):
             if self._cfg.loop and self._profiles:
                 self._round += 1

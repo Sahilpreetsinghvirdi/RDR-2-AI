@@ -113,6 +113,9 @@ def build_steps(cfg: AppConfig) -> list[ControlStep]:
         ControlStep("interact tap", "hold", keys["interact"], 0.15,
                     "Near a prompt: the context action starts; otherwise nothing.",
                     _ref(keys["interact"])),
+        ControlStep("horse whistle", "hold", keys["whistle"], 0.3,
+                    "A nearby horse starts coming to you; otherwise nothing.",
+                    _ref(keys["whistle"])),
     ]
     steps.extend(_remedy_steps(cfg))
     steps.append(ControlStep(

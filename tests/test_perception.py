@@ -162,6 +162,21 @@ def test_wanted_stars_flow_into_threat() -> None:
     assert state.threat.level == "wanted"
 
 
+def test_marker_offset_flows_into_objective_estimate() -> None:
+    import cv2
+
+    cfg = VisionConfig()
+    perception = Perception(cfg, ocr=NullOcr())
+    frame = _frame()
+    x, y, w, h = _boxes(cfg.hud)["minimap"]
+    cv2.circle(frame[y:y + h, x:x + w], (w // 2, h // 2), 6, (255, 255, 255), -1)
+    state = GameState()
+    perception.apply_to_state(state, perception.process(frame, 1))
+    assert state.mission.objective_location_estimate == [0.0, 0.0]
+    perception.apply_to_state(state, perception.process(_frame(), 2))
+    assert state.mission.objective_location_estimate is None
+
+
 def test_objective_text_flows_into_state() -> None:
     cfg = VisionConfig()
     cfg.ocr.every_n_frames = 1

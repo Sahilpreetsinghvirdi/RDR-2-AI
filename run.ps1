@@ -4,7 +4,7 @@
 #   .\run.ps1 -Demo
 #   .\run.ps1 -Autopilot
 #   .\run.ps1 -Headless -Record
-#   .\run.ps1 -Backend mss -ExtraArgs @("--duration","30")
+#   .\run.ps1 -Story -ExtraArgs @("--duration","30")
 #   .\run.ps1 -Doctor
 #   .\run.ps1 -ControlTest -ExtraArgs @("--dry-run")
 
@@ -12,6 +12,7 @@ param(
     [switch]$Demo,
     [switch]$Autopilot,
     [switch]$Mission,
+    [switch]$Story,
     [switch]$Headless,
     [switch]$Record,
     [switch]$Doctor,
@@ -35,8 +36,8 @@ if ($Doctor -and $ControlTest) {
     Write-Error "-Doctor and -ControlTest are mutually exclusive - pick one"
     exit 1
 }
-if (($Doctor -or $ControlTest) -and ($Demo -or $Autopilot -or $Mission -or $Headless -or $Record -or ($Backend -ne ""))) {
-    Write-Error "-Demo/-Autopilot/-Mission/-Headless/-Record/-Backend apply to agent runs only, not to -Doctor/-ControlTest"
+if (($Doctor -or $ControlTest) -and ($Demo -or $Autopilot -or $Mission -or $Story -or $Headless -or $Record -or ($Backend -ne ""))) {
+    Write-Error "-Demo/-Autopilot/-Mission/-Story/-Headless/-Record/-Backend apply to agent runs only, not to -Doctor/-ControlTest"
     exit 1
 }
 
@@ -55,6 +56,7 @@ if ($Doctor) {
     if ($Demo) { $argsList += "--demo" }
     if ($Autopilot) { $argsList += "--autopilot" }
     if ($Mission) { $argsList += "--mission" }
+    if ($Story) { $argsList += "--story" }
     if ($Headless) { $argsList += "--headless" }
     if ($Record) { $argsList += "--record" }
     if ($ExtraArgs.Count -gt 0) { $argsList += $ExtraArgs }

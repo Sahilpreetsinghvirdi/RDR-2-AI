@@ -94,3 +94,50 @@ def test_story_takes_planner_slot_and_arms_greet(
     kinds = [row["kind"] for row in rows]
     assert "crash" not in kinds
     assert kinds[-1] == "shutdown"
+
+
+def _write_base_config(tmp_path: Path, story_block: str) -> Path:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "\n".join([
+            story_block,
+            "telemetry:",
+            "  file: true",
+            f"  dir: {tmp_path.as_posix()}",
+            "  console: false",
+            "capture:",
+            "  backend: synthetic",
+            "  target_fps: 30",
+            "agent:",
+            "  loop_hz: 10",
+            "safety:",
+            "  hotkey_poll_hz: 100",
+            "  startup_grace_s: 1",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    return cfg_path
+
+
+def test_story_flag_enables_director(tmp_path: Path, monkeypatch) -> None:
+    RecordingStory.instances = []
+    cfg_path = _write_base_config(
+        tmp_path,
+        "story:\n  missions:\n    - name: flagged\n      tasks: []\n",
+    )
+    monkeypatch.setattr("src.main.GameWindowManager", FakeWindowManager)
+    monkeypatch.setattr("src.main.StoryRunner", RecordingStory)
+    rc = main(["--config", str(cfg_path), "--story", "--headless",
+               "--duration", "1"])
+    assert rc == 0
+    assert RecordingStory.instances, "StoryRunner was not built via --story"
+    assert RecordingStory.instances[0].steps > 0
+
+
+def test_story_flag_without_missions_fails(tmp_path: Path, monkeypatch) -> None:
+    cfg_path = _write_base_config(tmp_path, "")
+    monkeypatch.setattr("src.main.GameWindowManager", FakeWindowManager)
+    rc = main(["--config", str(cfg_path), "--story", "--headless",
+               "--duration", "1"])
+    assert rc == 2

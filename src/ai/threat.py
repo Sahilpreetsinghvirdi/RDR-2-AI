@@ -54,10 +54,11 @@ class ThreatAssessor:
         else:
             threat.level = "none"
 
-        base = state.confidence.combat
         if threat.incoming_fire:
-            state.confidence.combat = max(base, 0.8)
+            state.confidence.combat = 0.8
         elif threat.wanted_level >= 1:
-            state.confidence.combat = max(base, 0.7)
+            state.confidence.combat = 0.7
         elif threat.enemies_detected:
-            state.confidence.combat = max(base, 0.5)
+            state.confidence.combat = 0.5
+        else:
+            state.confidence.combat = 0.0

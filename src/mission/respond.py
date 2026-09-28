@@ -12,7 +12,7 @@ import logging
 
 from src.config import DialogueConfig
 from src.control.locomotion import LocomotionController
-from src.state.agent_status import AgentStatus
+from src.state.agent_status import StatusTracker
 from src.state.game_state import GameState
 
 log = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class PromptResponder:
         return self._taps
 
     def step(
-        self, now: float, status: AgentStatus, game_state: GameState
+        self, now: float, status: StatusTracker, game_state: GameState
     ) -> str | None:
         """React to the current encounter if mapped; returns the keyword or None."""
         encounter = game_state.dialogue.encounter

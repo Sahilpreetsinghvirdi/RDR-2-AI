@@ -95,6 +95,10 @@ class RoutePlanner:
     def heading_deg(self) -> float:
         return self._heading
 
+    def nudge_heading(self, delta_deg: float) -> None:
+        """Shift the dead-reckoned heading after an external camera move."""
+        self._heading += float(delta_deg)
+
     @property
     def current(self) -> str:
         if self._done:
@@ -138,8 +142,8 @@ class RoutePlanner:
                     -self._cfg.max_turn_deg_per_tick,
                     min(err, self._cfg.max_turn_deg_per_tick),
                 )
-                self._locomotion.turn(applied)
-                self._heading += applied
+                if self._locomotion.turn(applied):
+                    self._heading += applied
                 status.update(goal=goal, action=f"turn:{err:+.0f}deg")
             return
 
@@ -163,11 +167,13 @@ class RoutePlanner:
             self._complete_leg(status)
             return
 
-        if not self._locomotion.active:
+        driving = self._locomotion.active
+        if not driving:
             sprint = self._nav.sprint_after_m > 0 and remaining > self._nav.sprint_after_m
-            self._locomotion.move("forward", self._nav.step_s, sprint=sprint)
+            driving = self._locomotion.move("forward", self._nav.step_s, sprint=sprint)
 
-        self._progress_m += self._nav.walk_speed_mps * dt
+        if driving:
+            self._progress_m += self._nav.walk_speed_mps * dt
 
         if self._check_stall(now):
             status.update(

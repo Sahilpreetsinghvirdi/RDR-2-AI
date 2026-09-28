@@ -1,10 +1,11 @@
 # Notes: Two Modes
 
-Status: **Mode 1 skeleton implemented** - `StoryRunner` behind
-`story.enabled = false` (travel/objective/completion stages, objective-region
-OCR, completion keywords + banner OCR, stage timeouts, auto-greet). Still
-design-only: horse mount/dismount travel, authored real-mission profiles,
-Mode 2 (interactive), `agent.mode`. See the README "Story mode" section.
+Status: **Mode 1 implemented** - `StoryRunner` behind
+`story.enabled = false` (mount/travel/objective/completion stages,
+objective-region OCR, completion keywords + banner OCR, stage timeouts,
+marker homing, stranger detours, auto-greet). Still design-only: dismounting
+at the destination, authored real-mission profiles, Mode 2 (interactive),
+`agent.mode`. See the README "Story mode" section.
 
 ## Mode 1 - Full Autonomous Story Mode
 The AI plays the story end-to-end on its own.
@@ -38,12 +39,13 @@ between tasks; user answers (mission name / "free roam").
 - `StoryRunner` episode loop: stages `mount -> travel -> objective
   -> complete -> next step`; rides on top of existing RoutePlanner,
   mission tasks, prompt responder, survival, combat.
-  *implemented as `src/story/runner.py` (travel/objective/complete;
-  mount stage not built).*
+  *implemented as `src/story/runner.py` (all four stages; dismount at the
+  destination not built).*
 - `story:` config section: named waypoints (legs), per-step scripts,
   mount/dismount keys, completion keywords, auto-greet toggle.
-  *implemented (legs, tasks, keywords, banner region, timeouts,
-  auto-greet); mount keys not built.*
+  *implemented (legs, tasks incl. a generic `key` tap, keywords, banner
+  region, timeouts, auto-greet, `kind: stranger` + opportunistic detours,
+  `seek_marker` homing); dismount not built.*
 - Objective-region OCR into existing `GameState.mission.objective_text`
   (field exists, currently unused). *implemented (`vision.hud.regions.objective`).*
 - `nav.mounted_speed_mps` for route dead-reckoning while on horseback.

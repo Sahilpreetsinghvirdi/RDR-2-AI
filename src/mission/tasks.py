@@ -1,16 +1,16 @@
 """Mission task model and config parser (Phase 5).
 
 Tasks are declared in ``config.yaml`` under ``mission.tasks`` as one-key
-mappings (``turn``, ``walk``, ``wait``, ``wait_for``, ``interact``, ``log``).
-Parsing happens once at startup; the runner only ever executes validated
-:class:`Task` objects.
+mappings (``turn``, ``walk``, ``wait``, ``wait_for``, ``interact``, ``key``,
+``log``). Parsing happens once at startup; the runner only ever executes
+validated :class:`Task` objects.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-TASK_KINDS = ("turn", "walk", "wait", "wait_for", "interact", "log")
+TASK_KINDS = ("turn", "walk", "wait", "wait_for", "interact", "key", "log")
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,7 @@ class Task:
     field: str = ""                 # wait_for: dotted GameState path
     equals: object = None           # wait_for: required value
     timeout_s: float | None = None  # wait_for: give up after this long
+    key: str = ""                   # key: control.keys role to tap once
     text: str = ""                  # log: message
 
     @property
@@ -40,6 +41,8 @@ class Task:
             return f"wait_for:{self.field}"
         if self.kind == "interact":
             return "interact"
+        if self.kind == "key":
+            return f"key:{self.key}"
         return f"log:{self.text}"
 
 
@@ -99,6 +102,14 @@ def parse_task(raw: object, index: int) -> Task:
         if not isinstance(value, dict):
             raise ValueError(f"{where}.interact takes an empty mapping")
         return Task(kind="interact")
+
+    if kind == "key":
+        if not isinstance(value, dict) or "name" not in value:
+            raise ValueError(f"{where}.key requires a 'name' role from control.keys")
+        name = value["name"]
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{where}.key.name must be a non-empty string")
+        return Task(kind="key", key=name)
 
     # log
     if not isinstance(value, dict) or "text" not in value:

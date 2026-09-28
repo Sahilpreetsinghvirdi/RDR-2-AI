@@ -120,6 +120,7 @@ DEFAULT_CONTROL_KEYS: dict[str, str] = {
     "sprint": "shift",
     "jump": "space",
     "interact": "e",
+    "whistle": "h",
 }
 
 
@@ -383,6 +384,11 @@ class StoryConfig:
     objective_timeout_s: float = 900.0   # task stage budget
     completion_timeout_s: float = 60.0   # completion-watch budget
     pause_grace_s: float = 15.0          # longer step gaps count as pause time
+    opportunistic: bool = True           # detour to stranger markers when seen
+    mount_timeout_s: float = 60.0        # whistle/wait budget for the mount stage
+    mount_wait_s: float = 4.0            # settle time after mounting up
+    mounted_speed_mps: float = 4.2       # route progress speed while mounted
+    marker_persist_frames: int = 3       # consecutive frames to trust a marker
 
 
 @dataclass
@@ -538,6 +544,17 @@ class AppConfig:
             problems.append(f"control.keys unknown {sorted(extra)}")
         if any(not isinstance(v, str) or not v.strip() for v in ctrl.keys.values()):
             problems.append("control.keys values must be non-empty strings")
+        else:
+            from src.input.keys import normalize_key  # lazy: import-light config
+
+            for role, keyname in ctrl.keys.items():
+                try:
+                    normalize_key(keyname)
+                except ValueError:
+                    problems.append(
+                        f"control.keys[{role!r}] is not a known key, "
+                        f"got {keyname!r}"
+                    )
         if ctrl.mouse_px_per_degree <= 0:
             problems.append("control.mouse_px_per_degree must be > 0")
         if ctrl.max_turn_deg_per_tick <= 0:
@@ -576,9 +593,16 @@ class AppConfig:
             from src.mission.tasks import parse_tasks  # lazy: keep config import-light
 
             try:
-                parse_tasks(list(mission.tasks))
+                parsed_tasks = parse_tasks(list(mission.tasks))
             except ValueError as exc:
                 problems.append(str(exc))
+            else:
+                for task in parsed_tasks:
+                    if task.kind == "key" and task.key not in self.control.keys:
+                        problems.append(
+                            f"mission task key {task.key!r} must name "
+                            "a control.keys entry"
+                        )
         story = self.story
         if story.enabled and not story.missions:
             problems.append("story.enabled requires at least one story.missions entry")
@@ -616,9 +640,28 @@ class AppConfig:
                 from src.mission.tasks import parse_tasks  # lazy import again
 
                 try:
-                    parse_tasks(list(tasks))
+                    parsed = parse_tasks(list(tasks))
                 except ValueError as exc:
                     problems.append(f"{where}: {exc}")
+                else:
+                    for task in parsed:
+                        if task.kind == "key" and task.key not in self.control.keys:
+                            problems.append(
+                                f"{where}: task key {task.key!r} must name "
+                                "a control.keys entry"
+                            )
+            if "wait_completion" in profile and not isinstance(
+                profile["wait_completion"], bool
+            ):
+                problems.append(f"{where}.wait_completion must be a boolean")
+            kind = profile.get("kind", "story")
+            if kind not in ("story", "stranger"):
+                problems.append(
+                    f"{where}.kind must be story|stranger, got {kind!r}"
+                )
+            for flag in ("mount", "seek_marker"):
+                if flag in profile and not isinstance(profile[flag], bool):
+                    problems.append(f"{where}.{flag} must be a boolean")
         if (
             not isinstance(story.completion_keywords, list)
             or any(
@@ -647,6 +690,7 @@ class AppConfig:
         for sname in (
             "travel_timeout_s", "objective_timeout_s",
             "completion_timeout_s", "pause_grace_s",
+            "mount_timeout_s", "mount_wait_s", "mounted_speed_mps",
         ):
             value = getattr(story, sname)
             if (
@@ -654,6 +698,12 @@ class AppConfig:
                 or value <= 0
             ):
                 problems.append(f"story.{sname} must be > 0")
+        if (
+            not isinstance(story.marker_persist_frames, int)
+            or isinstance(story.marker_persist_frames, bool)
+            or story.marker_persist_frames < 1
+        ):
+            problems.append("story.marker_persist_frames must be an int >= 1")
         if (
             not isinstance(story.completion_every_n_frames, int)
             or isinstance(story.completion_every_n_frames, bool)
@@ -676,7 +726,8 @@ class AppConfig:
             problems.append("combat.retreat_health_frac must be within 0..1")
         if combat.aim_dead_zone_deg < 0:
             problems.append("combat.aim_dead_zone_deg must be >= 0")
-        if combat.fire_button not in {"left", "right", "middle", "x1", "x2"}:
+        if combat.fire_button not in {"left", "right", "middle", "x1", "x2",
+                                             "lmb", "rmb", "mmb"}:
             problems.append(
                 f"combat.fire_button must be a mouse button name, got {combat.fire_button!r}"
             )
@@ -863,12 +914,23 @@ def _plain(data: Any) -> Any:
     return data
 
 
+_OPEN_MAPS = frozenset({
+    "survival.remedies",
+    "vision.dialogue.respond_to",
+    "vision.hud.regions",
+    "vision.world.regions",
+})
+
+
 def _merge(defaults: dict[str, Any], override: dict[str, Any], path: str,
            warnings: list[str]) -> dict[str, Any]:
     out = copy.deepcopy(defaults)
     for key, value in override.items():
         dotted = f"{path}.{key}" if path else key
         if key not in out:
+            if path in _OPEN_MAPS:
+                out[key] = value
+                continue
             warnings.append(f"unknown config key ignored: {dotted}")
             continue
         if isinstance(out[key], dict) and isinstance(value, dict):
@@ -949,13 +1011,29 @@ def _apply_override(data: dict[str, Any], expr: str, warnings: list[str]) -> Non
     parts = [p for p in dotted.strip().split(".") if p]
     if not parts:
         raise ConfigError(f"--set expects key=value, got {expr!r}")
-    node: dict[str, Any] = data
+    node: Any = data
     for part in parts[:-1]:
+        if isinstance(node, list) and part.isdigit():
+            index = int(part)
+            if index >= len(node):
+                raise ConfigError(f"--set path not found: {dotted!r} (at {part!r})")
+            node = node[index]
+            continue
+        if not isinstance(node, dict):
+            raise ConfigError(f"--set path not found: {dotted!r} (at {part!r})")
         child = node.get(part)
-        if not isinstance(child, dict):
+        if not isinstance(child, (dict, list)):
             raise ConfigError(f"--set path not found: {dotted!r} (at {part!r})")
         node = child
     leaf = parts[-1]
+    if isinstance(node, list) and leaf.isdigit():
+        index = int(leaf)
+        if index >= len(node):
+            raise ConfigError(f"--set path not found: {dotted!r} (at {leaf!r})")
+        node[index] = yaml.safe_load(raw)
+        return
+    if not isinstance(node, dict):
+        raise ConfigError(f"--set path not found: {dotted!r} (at {leaf!r})")
     if leaf not in node:
         warnings.append(f"--set targets unknown config key: {dotted}")
     node[leaf] = yaml.safe_load(raw)
