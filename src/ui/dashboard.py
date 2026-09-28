@@ -88,7 +88,8 @@ class Dashboard:
             else:
                 emergency, pause, takeover = self._keys
                 view = build_card(
-                    status, emergency=emergency, pause=pause,
+                    status, title=self._cfg.app_title,
+                    emergency=emergency, pause=pause,
                     takeover=takeover, waiting=packet is None,
                 )
             cv2.imshow(self._cfg.window_name, view)
@@ -99,6 +100,17 @@ class Dashboard:
             if self.errors == 1 or self.errors % 100 == 0:
                 log.error("dashboard disabled after rendering error: %s", exc)
             self._disabled = True
+
+    def visible(self) -> bool:
+        """False once the user closes the card window (errors count as open)."""
+        if self._disabled or not self._created:
+            return True
+        try:
+            return bool(cv2.getWindowProperty(
+                self._cfg.window_name, cv2.WND_PROP_VISIBLE
+            ))
+        except Exception:
+            return True
 
     def close(self) -> None:
         if not self._created:

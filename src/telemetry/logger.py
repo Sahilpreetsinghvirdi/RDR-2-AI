@@ -30,7 +30,7 @@ def setup_logging(cfg: TelemetryConfig) -> Path | None:
     root.setLevel(level)
     formatter = logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT)
 
-    if cfg.console:
+    if cfg.console and sys.stdout is not None:
         console = logging.StreamHandler(sys.stdout)
         console.setFormatter(formatter)
         console.setLevel(level)

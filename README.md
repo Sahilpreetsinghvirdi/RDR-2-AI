@@ -417,7 +417,7 @@ tools/
   input_check.py       test keyboard/mouse injection
 docs/
   CONTROLS.md          full PC controls reference + agent key cross-map
-tests/                 630 tests (pytest)
+tests/                 636 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -485,6 +485,7 @@ HUD elements (leave a small margin around each core).
 .\run.ps1                     # normal run (debug window on)
 .\run.ps1 -Demo               # Phase 1 input demonstration
 .\run.ps1 -Headless -Record   # no debug window, record frames
+.\run.ps1 -NoConsole          # hide the console, card window only (F12 stops)
 .\run.ps1 -Backend synthetic  # development without the game
 .\run.ps1 -ExtraArgs @("--duration","30")
 
@@ -494,7 +495,7 @@ HUD elements (leave a small margin around each core).
 ```
 
 CLI flags: `--config`, `--set KEY=VALUE` (repeatable), `--demo`, `--autopilot`,
-`--mission`, `--headless`, `--record`,
+`--mission`, `--story`, `--brain`, `--interactive`, `--headless`, `--record`,
 `--backend {auto,dxcam,mss,synthetic}`, `--duration N`, `--version`.
 
 ## Emergency stop
@@ -543,7 +544,7 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | `rl`        | learned-policy driver (mode, checkpoint/buffer paths, reward weights) |
 | `brain`     | local vision-model driver (ollama model/host, cadence, staleness) - experimental, off by default |
 | `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators + minimap enemy blips, `dialogue` band/keywords/reactions, `ocr` engine/throttling |
-| `debug`     | status card window, hotkey labels, `show_video` (frame+panel), `show_overlay`/`show_hud` boxes, panel width |
+| `debug`     | status card window (`app_title`, hotkey labels), `show_video` (frame+panel), `show_overlay`/`show_hud` boxes, panel width |
 | `recording` | fps, format, max frames, state jsonl |
 | `telemetry` | console/file logs, `events.jsonl`, metrics interval, log level |
 
@@ -643,7 +644,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 630 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 636 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 .\run.ps1 -Doctor                            # environment self-check
 .\run.ps1 -ControlTest                       # guided input verification

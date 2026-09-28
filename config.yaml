@@ -11,9 +11,9 @@ window:
   title_patterns:
     - "Red Dead Redemption 2"
     - "RDR2"
-  # Never treat these (our own debug window contains "RDR2").
+  # Never treat these (our own status card window) as the game.
   exclude_patterns:
-    - "RDR2 AI - Debug"
+    - "Outlaw"
   match: exact                # exact = whole title must equal a pattern.
                               # A substring match would also accept browser
                               # tabs such as "... Red Dead Redemption 2 ...".
@@ -278,7 +278,8 @@ vision:
 
 debug:
   gui: true
-  window_name: "RDR2 AI - Debug"
+  window_name: "Outlaw"
+  app_title: "Outlaw"
   render_fps: 20
   show_overlay: true
   show_hud: true            # draw detected HUD region boxes on the overlay

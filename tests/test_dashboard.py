@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from src.config import AppConfig, ConfigError, DebugConfig
 from src.state.agent_status import AgentStatus
@@ -87,6 +88,47 @@ def test_dashboard_disabled_is_noop() -> None:
     dash.show(None, AgentStatus())
     assert dash.shown == 0
     assert dash.enabled is False
+
+
+def test_card_uses_configured_title() -> None:
+    default = build_card(AgentStatus(state="RUNNING"))
+    custom = build_card(AgentStatus(state="RUNNING"), title="Arthur")
+    assert default.shape == custom.shape
+    assert not (default == custom).all()
+
+
+def test_title_text_is_red() -> None:
+    card = build_card(AgentStatus(state="RUNNING"))
+    top = card[8:50, 0:400]
+    red = top[:, :, 2].astype(int) - np.maximum(
+        top[:, :, 0], top[:, :, 1]).astype(int)
+    assert (red > 100).mean() > 0.02
+
+
+def test_app_title_validated() -> None:
+    assert DebugConfig().app_title == "RDR2 AI"
+    cfg = AppConfig()
+    cfg.debug.app_title = "   "
+    try:
+        cfg.validate()
+    except ConfigError as exc:
+        assert "debug.app_title" in str(exc)
+    else:
+        raise AssertionError("expected ConfigError")
+
+
+def test_dashboard_visible_states(monkeypatch) -> None:
+    dash = Dashboard(DebugConfig(gui=False))
+    assert dash.visible() is True
+    dash2 = Dashboard(DebugConfig(gui=True))
+    assert dash2.visible() is True
+    dash2._created = True  # noqa: SLF001 - white-box window check
+    monkeypatch.setattr(cv2, "getWindowProperty", lambda *args: 0.0)
+    assert dash2.visible() is False
+    def _boom(*args: object) -> float:
+        raise RuntimeError("no display")
+    monkeypatch.setattr(cv2, "getWindowProperty", _boom)
+    assert dash2.visible() is True
 
 
 def test_window_autosize_for_card(monkeypatch) -> None:

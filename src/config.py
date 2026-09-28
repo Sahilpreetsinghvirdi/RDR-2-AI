@@ -418,6 +418,7 @@ class BrainConfig:
 class DebugConfig:
     gui: bool = True
     window_name: str = "RDR2 AI - Debug"
+    app_title: str = "RDR2 AI"
     render_fps: int = 20
     show_overlay: bool = True
     show_hud: bool = True
@@ -507,6 +508,11 @@ class AppConfig:
         _positive("capture.max_frame_age_ms", self.capture.max_frame_age_ms, (int,))
         if not isinstance(self.debug.show_video, bool):
             problems.append("debug.show_video must be a boolean")
+        if (
+            not isinstance(self.debug.app_title, str)
+            or not self.debug.app_title.strip()
+        ):
+            problems.append("debug.app_title must be a non-empty string")
 
         if self.capture.backend not in {"auto", "dxcam", "mss", "synthetic"}:
             problems.append(

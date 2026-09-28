@@ -441,6 +441,10 @@ def _render_loop(
             dashboard.show(capture.buffer.latest(), status.snapshot())
         except Exception:
             log.exception("render iteration failed")
+        if not dashboard.visible():
+            log.info("status card closed - stopping")
+            machine.request(AgentState.STOPPED, "dashboard closed")
+            break
         machine.stop_event.wait(interval)
     dashboard.close()
 
@@ -753,22 +757,31 @@ def _disable_primary_drivers(cfg: AppConfig) -> None:
     cfg.brain.enabled = False
 
 
+def _say(*args: object, **kwargs: object) -> None:
+    """print() that survives console-less launches (pythonw hides stdout)."""
+    try:
+        print(*args, **kwargs)
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 def _apply_interactive_choice(cfg: AppConfig) -> None:
     """NOTES Mode 2: console picker over missions, free roam, or observe."""
     missions = [p for p in cfg.story.missions if isinstance(p, dict)]
-    if not sys.stdin.isatty():
+    stdin = sys.stdin
+    if stdin is None or not stdin.isatty():
         log.warning("interactive mode without a console - observing only")
         _disable_primary_drivers(cfg)
         cfg.agent.mode = "interactive"
         cfg.validate()
         return
-    print("RDR2 AI - what should Arthur do this session?")
+    _say("RDR2 AI - what should Arthur do this session?")
     for i, profile in enumerate(missions, start=1):
         name = str(profile.get("name") or f"mission {i}")
         kind = str(profile.get("kind", "story"))
-        print(f"  {i}. {name} [{kind}]")
-    print("  R. free roam (wander + greet + survival upkeep)")
-    print("  O. observe only")
+        _say(f"  {i}. {name} [{kind}]")
+    _say("  R. free roam (wander + greet + survival upkeep)")
+    _say("  O. observe only")
     try:
         choice = input(
             f"choice [1..{len(missions)}/R/O, default O]: "
@@ -798,7 +811,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.interactive:
             _apply_interactive_choice(cfg)
     except ConfigError as exc:
-        print(f"config error: {exc}", file=sys.stderr)
+        _say(f"config error: {exc}", file=sys.stderr)
         return 2
 
     enable_dpi_awareness()

@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import cv2
 import numpy as np
 
 from src.state.agent_status import AgentStatus
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    Image = None  # type: ignore[assignment]
+    ImageDraw = None  # type: ignore[assignment]
+    ImageFont = None  # type: ignore[assignment]
 
 STATE_COLORS_BGR: dict[str, tuple[int, int, int]] = {
     "INIT": (190, 190, 190),
@@ -155,9 +164,13 @@ _CARD_WIDTH = 400
 _CARD_ROW_H = 22
 _CARD_MARGIN = 12
 _CARD_MAX_ROWS = 13
+_TITLE_RED_RGB = (238, 34, 35)
+_TITLE_FONT_PATH = (
+    Path(__file__).resolve().parents[2] / "assets" / "fonts" / "Rye-Regular.ttf"
+)
+_title_fonts: dict[int, object] = {}
 
-_CARD_STYLE: dict[str, tuple[float, tuple[int, int, int]]] = {
-    "state": (0.60, (80, 200, 80)),
+_CARD_STYLE: dict[str, tuple[float, tuple[int, int, int]]] = {    "state": (0.60, (80, 200, 80)),
     "doing": (0.50, (235, 235, 235)),
     "msg": (0.46, (200, 210, 230)),
     "cores": (0.50, (235, 235, 235)),
@@ -171,13 +184,48 @@ _CARD_STYLE: dict[str, tuple[float, tuple[int, int, int]]] = {
 }
 
 
+def _slab_font(size_px: int):
+    """Western slab title font, cached per size; raises when unavailable."""
+    if ImageFont is None:
+        raise ImportError("Pillow is not installed")
+    cached = _title_fonts.get(size_px)
+    if cached is None:
+        cached = ImageFont.truetype(str(_TITLE_FONT_PATH), size_px)
+        _title_fonts[size_px] = cached
+    return cached
+
+
+def _draw_title(card: np.ndarray, title: str) -> None:
+    """Red slab-serif title; falls back to a Hershey face when needed."""
+    try:
+        rgb = cv2.cvtColor(card, cv2.COLOR_BGR2RGB)
+        canvas = Image.fromarray(rgb)
+        draw = ImageDraw.Draw(canvas)
+        size = 40
+        font = _slab_font(size)
+        limit = _CARD_WIDTH - 2 * _CARD_MARGIN
+        while size > 14:
+            box = draw.textbbox((0, 0), title, font=font)
+            if box[2] - box[0] <= limit:
+                break
+            size -= 2
+            font = _slab_font(size)
+        draw.text((_CARD_MARGIN, 8), title, font=font, fill=_TITLE_RED_RGB)
+        card[:] = cv2.cvtColor(np.array(canvas), cv2.COLOR_RGB2BGR)
+    except Exception:
+        _draw_card_text(card, title, _CARD_MARGIN, 40, 0.9,
+                        (35, 34, 238), cv2.FONT_HERSHEY_TRIPLEX)
+
+
 def _draw_card_text(canvas: np.ndarray, text: str, x: int, y: int,
-                    scale: float, color: tuple[int, int, int]) -> None:
+                    scale: float, color: tuple[int, int, int],
+                    font: int = cv2.FONT_HERSHEY_SIMPLEX) -> None:
     cv2.putText(canvas, text, (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
+                font, scale, color, 1, cv2.LINE_AA)
 
 
-def build_card(status: AgentStatus, *, emergency: str = "F12",
+def build_card(status: AgentStatus, *, title: str = "RDR2 AI",
+               emergency: str = "F12",
                pause: str = "F11", takeover: str = "F10",
                waiting: bool = False) -> np.ndarray:
     """Render the small status card (no game frame): title, rows, hotkeys."""
@@ -194,14 +242,14 @@ def build_card(status: AgentStatus, *, emergency: str = "F12",
                 break
         if len(wrapped) >= _CARD_MAX_ROWS:
             break
-    height = (12 + 30 + 8 + len(wrapped) * _CARD_ROW_H + 10 + 24 + 10)
+    height = (50 + 14 + len(wrapped) * _CARD_ROW_H + 10 + 24 + 10)
     card = np.full((height, _CARD_WIDTH, 3), 22, dtype=np.uint8)
     color = state_color(status.state)
     cv2.rectangle(card, (0, 0), (_CARD_WIDTH - 1, 6), color, -1)
 
-    _draw_card_text(card, "RDR2 AI", _CARD_MARGIN, 36, 0.85, (255, 255, 255))
+    _draw_title(card, title or "RDR2 AI")
 
-    y = 36 + 8 + 16
+    y = 50 + 14
     for text, kind in wrapped:
         scale, row_color = _CARD_STYLE.get(kind, (0.5, (235, 235, 235)))
         if kind == "state":

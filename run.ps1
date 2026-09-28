@@ -5,6 +5,7 @@
 #   .\run.ps1 -Autopilot
 #   .\run.ps1 -Headless -Record
 #   .\run.ps1 -Story -ExtraArgs @("--duration","30")
+#   .\run.ps1 -NoConsole   # hide the console, card window only (F12 stops)
 #   .\run.ps1 -Interactive -Headless
 #   .\run.ps1 -Doctor
 #   .\run.ps1 -ControlTest -ExtraArgs @("--dry-run")
@@ -18,6 +19,7 @@ param(
     [switch]$Interactive,
     [switch]$Headless,
     [switch]$Record,
+    [switch]$NoConsole,
     [switch]$Doctor,
     [switch]$ControlTest,
     [string]$Config = "",
@@ -41,6 +43,11 @@ if ($Doctor -and $ControlTest) {
 }
 if (($Doctor -or $ControlTest) -and ($Demo -or $Autopilot -or $Mission -or $Story -or $Brain -or $Interactive -or $Headless -or $Record -or ($Backend -ne ""))) {
     Write-Error "-Demo/-Autopilot/-Mission/-Story/-Brain/-Interactive/-Headless/-Record/-Backend apply to agent runs only, not to -Doctor/-ControlTest"
+    exit 1
+}
+
+if ($NoConsole -and ($Doctor -or $ControlTest -or $Interactive)) {
+    Write-Error "-NoConsole cannot be combined with -Doctor/-ControlTest/-Interactive (they need the console)"
     exit 1
 }
 
@@ -72,5 +79,7 @@ if (-not $Doctor) {
     Write-Host "Emergency stop: F12 | Pause: F11 | Human takeover: F10" -ForegroundColor Yellow
 }
 
-& $venvPython $argsList
+$pythonExe = $venvPython
+if ($NoConsole) { $pythonExe = Join-Path $Root ".venv\Scripts\pythonw.exe" }
+& $pythonExe $argsList
 exit $LASTEXITCODE
