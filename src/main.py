@@ -40,10 +40,12 @@ from src.safety.state_machine import AgentState, StateMachine
 from src.safety.watchdog import HeartbeatRegistry, Watchdog
 from src.state.agent_status import StatusTracker
 from src.state.game_state import GameState
+from src.story import StoryRunner
 from src.telemetry.logger import EventLog, setup_logging
 from src.telemetry.recorder import SessionRecorder
 from src.ui.dashboard import Dashboard
 from src.vision.fast_pass import FastPass
+from src.vision.ocr import create_ocr
 from src.vision.perception import (
     Perception,
     PerceptionResult,
@@ -132,8 +134,24 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         stop_event=machine.stop_event,
     )
     locomotion = LocomotionController(cfg.control, input_ctrl)
-    planner: ScriptedPlanner | RoutePlanner | MissionRunner | None = None
-    if cfg.mission.enabled:
+    ocr_engine = create_ocr(cfg.vision.ocr)
+    planner: ScriptedPlanner | RoutePlanner | MissionRunner | StoryRunner | None = None
+    if cfg.story.enabled:
+        planner = StoryRunner(
+            cfg.story,
+            cfg.control,
+            locomotion,
+            cfg.vision.hud.regions.get("minimap"),
+            ocr=ocr_engine,
+            ocr_min_confidence=cfg.vision.ocr.min_confidence,
+        )
+        log.info(
+            "story mode - %d missions%s%s",
+            len(cfg.story.missions),
+            ", looping" if cfg.story.loop else "",
+            ", auto-greet on" if cfg.story.auto_greet else "",
+        )
+    elif cfg.mission.enabled:
         planner = MissionRunner(
             cfg.mission, cfg.control, locomotion,
             cfg.vision.hud.regions.get("minimap"),
@@ -152,6 +170,9 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         else:
             planner = ScriptedPlanner(cfg.control, locomotion)
             log.info("autopilot enabled - scripted locomotion active while RUNNING")
+
+    if cfg.story.enabled and cfg.story.auto_greet:
+        cfg.vision.dialogue.respond_to.setdefault("greet", "interact")
 
     responder: PromptResponder | None = None
     if cfg.vision.dialogue.respond_to:
@@ -214,7 +235,7 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
         recorder = SessionRecorder(cfg.recording, cfg.resolve(cfg.recording.dir))
     dashboard = Dashboard(cfg.debug)
     fast = FastPass(cfg.vision.fast)
-    perception = Perception(cfg.vision)
+    perception = Perception(cfg.vision, ocr=ocr_engine)
     game_state = GameState()
     if not cfg.vision.hud.enabled:
         log.info("hud perception disabled (vision.hud.enabled=false)")
@@ -399,7 +420,7 @@ def _agent_loop(
     demo: Phase1Demo | None,
     started: float,
     locomotion: LocomotionController,
-    planner: ScriptedPlanner | RoutePlanner | MissionRunner | None,
+    planner: ScriptedPlanner | RoutePlanner | MissionRunner | StoryRunner | None,
     responder: PromptResponder | None = None,
     assessor: ThreatAssessor | None = None,
     combat: CombatPlanner | None = None,
@@ -532,7 +553,7 @@ def _run_active_work(
     demo: Phase1Demo | None,
     events: EventLog,
     locomotion: LocomotionController,
-    planner: ScriptedPlanner | RoutePlanner | MissionRunner | None,
+    planner: ScriptedPlanner | RoutePlanner | MissionRunner | StoryRunner | None,
     responder: PromptResponder | None = None,
     assessor: ThreatAssessor | None = None,
     combat: CombatPlanner | None = None,

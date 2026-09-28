@@ -32,6 +32,7 @@ class PerceptionResult:
     dialogue: DialogueReading
     prompt_text: str | None = None
     prompt_changed: bool = False
+    objective_text: str | None = None
     ammo: int | None = None
     encounter: str | None = None
     ocr_engine: str = "off"
@@ -53,6 +54,7 @@ class Perception:
         self._dlg_every = max(1, cfg.dialogue.every_n_frames)
         self._counter = 0
         self._ammo_counter = 0
+        self._obj_counter = 0
         self._dlg_counter = 0
         self._last_prompt: str = ""
         self._last_dialogue_text: str = ""
@@ -98,6 +100,14 @@ class Perception:
                         if text != self._last_prompt:
                             result.prompt_changed = True
                             self._last_prompt = text
+            objective = hud.objective
+            if objective is not None and objective.present:
+                self._obj_counter += 1
+                if self._obj_counter % self._every == 0:
+                    x, y, w, h = objective.bbox
+                    text, conf = self._ocr.read(frame[y:y + h, x:x + w])
+                    if text and conf * 100.0 >= self._cfg.ocr.min_confidence:
+                        result.objective_text = text
             weapon = world.weapon
             if weapon is not None and weapon.ammo_visible:
                 self._ammo_counter += 1
@@ -180,6 +190,15 @@ class Perception:
                 state.mission.prompt_text = result.prompt_text
         else:
             state.mission.prompt_text = None
+
+        objective = hud.objective
+        if objective is not None and objective.present:
+            if result.objective_text:
+                state.mission.objective_text = result.objective_text
+                state.mission.active = True
+        elif objective is not None:
+            state.mission.objective_text = None
+            state.mission.active = False
 
         if hud.wanted is not None and hud.wanted.value:
             state.threat.wanted_level = int(hud.wanted.value)

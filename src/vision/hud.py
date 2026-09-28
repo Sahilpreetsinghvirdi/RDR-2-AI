@@ -41,6 +41,7 @@ class HudDetection:
     minimap: RegionReading | None = None
     prompt: RegionReading | None = None
     wanted: RegionReading | None = None
+    objective: RegionReading | None = None
     latency_ms: float = 0.0
     skipped: bool = False
 
@@ -56,7 +57,7 @@ class HudDetection:
             reading = self.gauges.get(key)
             if reading is not None and reading.present and reading.bbox:
                 out.append(list(reading.bbox))
-        for reading in (self.minimap, self.prompt, self.wanted):
+        for reading in (self.minimap, self.prompt, self.wanted, self.objective):
             if reading is not None and reading.present and reading.bbox:
                 out.append(list(reading.bbox))
         return out
@@ -68,7 +69,7 @@ class HudDetection:
             reading = self.gauges.get(key)
             if reading is not None and reading.present:
                 out.append(reading.label)
-        for reading in (self.minimap, self.prompt, self.wanted):
+        for reading in (self.minimap, self.prompt, self.wanted, self.objective):
             if reading is not None and reading.present:
                 out.append(reading.label)
         return out
@@ -82,6 +83,7 @@ class HudDetection:
             "minimap": self.minimap.present if self.minimap else None,
             "prompt": self.prompt.present if self.prompt else None,
             "wanted": self.wanted.value if self.wanted else None,
+            "objective": self.objective.present if self.objective else None,
             "latency_ms": round(self.latency_ms, 2),
             "skipped": self.skipped,
         }
@@ -238,21 +240,35 @@ def _read_minimap(
     return True, round(conf, 3)
 
 
-def _read_prompt(crop: np.ndarray, cfg: HudConfig) -> tuple[bool, float]:
-    """Prompt text: near-white glyphs with enough edge density."""
+def _read_text(
+    crop: np.ndarray, min_edge_density: float, min_bright_frac: float
+) -> tuple[bool, float]:
+    """White glyph text: near-white pixels with enough edge density."""
     gray = _to_gray(crop)
     if gray is None or min(gray.shape[:2]) < 8:
         return False, 0.0
     edges = cv2.Canny(gray, 60, 150)
     density = float((edges > 0).mean())
     bright = float((gray > 190).mean())
-    ok = density >= cfg.prompt_min_edge_density and bright >= cfg.prompt_min_bright_frac
+    ok = density >= min_edge_density and bright >= min_bright_frac
     conf = min(
-        density / (2.0 * cfg.prompt_min_edge_density),
-        bright / (2.0 * cfg.prompt_min_bright_frac),
+        density / (2.0 * min_edge_density),
+        bright / (2.0 * min_bright_frac),
         1.0,
     )
     return ok, round(max(conf, 0.0), 3)
+
+
+def _read_prompt(crop: np.ndarray, cfg: HudConfig) -> tuple[bool, float]:
+    """Prompt text: near-white glyphs with enough edge density."""
+    return _read_text(crop, cfg.prompt_min_edge_density, cfg.prompt_min_bright_frac)
+
+
+def _read_objective(crop: np.ndarray, cfg: HudConfig) -> tuple[bool, float]:
+    """Objective text: same glyph statistics, looser thresholds."""
+    return _read_text(
+        crop, cfg.objective_min_edge_density, cfg.objective_min_bright_frac
+    )
 
 
 def _read_wanted(crop: np.ndarray, cfg: HudConfig) -> tuple[float | None, float]:
@@ -339,6 +355,15 @@ class HudReader:
                 name="wanted", bbox=list(box), value=value,
                 present=value is not None, confidence=conf,
                 label=f"stars x{int(value)}" if value is not None else "stars --",
+            )
+
+        box = boxes.get("objective")
+        if box is not None:
+            x, y, w, h = box
+            present, conf = _read_objective(frame[y:y + h, x:x + w], self._cfg)
+            detection.objective = RegionReading(
+                name="objective", bbox=list(box), present=present, confidence=conf,
+                label="objective" if present else "objective --",
             )
 
         detection.latency_ms = (time.perf_counter() - t0) * 1000.0

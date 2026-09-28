@@ -1,8 +1,10 @@
-# Notes: Two Planned Modes (DESIGN ONLY - NOT IMPLEMENTED)
+# Notes: Two Modes
 
-Status: **notes only** (per user decision). Do not implement until all
-phases (1-11) are complete AND basic control test runs (simple
-keyboard/mouse input verification) have been done first.
+Status: **Mode 1 skeleton implemented** - `StoryRunner` behind
+`story.enabled = false` (travel/objective/completion stages, objective-region
+OCR, completion keywords + banner OCR, stage timeouts, auto-greet). Still
+design-only: horse mount/dismount travel, authored real-mission profiles,
+Mode 2 (interactive), `agent.mode`. See the README "Story mode" section.
 
 ## Mode 1 - Full Autonomous Story Mode
 The AI plays the story end-to-end on its own.
@@ -30,19 +32,24 @@ The agent asks the user what to do each session:
 Question prompt would appear in the console/dashboard at startup or
 between tasks; user answers (mission name / "free roam").
 
-## Sketch for Later (do not build now)
+## Sketch for Later
 - Config: `agent.mode: assist | autonomous | interactive`
-  (`assist` = current behavior, untouched).
-- New `StoryRunner` episode loop: stages `mount -> travel -> objective
+  (`assist` = current behavior, untouched). *not built*
+- `StoryRunner` episode loop: stages `mount -> travel -> objective
   -> complete -> next step`; rides on top of existing RoutePlanner,
   mission tasks, prompt responder, survival, combat.
+  *implemented as `src/story/runner.py` (travel/objective/complete;
+  mount stage not built).*
 - `story:` config section: named waypoints (legs), per-step scripts,
   mount/dismount keys, completion keywords, auto-greet toggle.
+  *implemented (legs, tasks, keywords, banner region, timeouts,
+  auto-greet); mount keys not built.*
 - Objective-region OCR into existing `GameState.mission.objective_text`
-  (field exists, currently unused).
+  (field exists, currently unused). *implemented (`vision.hud.regions.objective`).*
 - `nav.mounted_speed_mps` for route dead-reckoning while on horseback.
+  *not built.*
 - Interactive mode: console picker over a mission-profile library; a
-  `free_roam` profile with wander/greet/survive behaviors.
+  `free_roam` profile with wander/greet/survive behaviors. *not built.*
 - Mission profiles: config-declared scripts per story mission (no
   memory reading; vision/OCR only) - real missions need authoring.
 

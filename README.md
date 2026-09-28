@@ -237,6 +237,53 @@ code into the game, or interact with Red Dead Online.
   run it in Story Mode before any autonomous behavior, then the demo and
   autopilot runs.
 
+### Story mode (Mode 1 skeleton) - scripted story director
+
+`src/story/runner.py` (NOTES Mode 1) plays a configured mission list
+end-to-end behind the disabled-by-default `story.enabled` flag. Per mission
+the director runs three stages, then advances:
+
+- **travel** - follows `legs: [[bearing, meters], ...]` route legs through the
+  Phase 4 `RoutePlanner` (minimap stall detection included).
+- **objective** - runs the profile's `tasks` through the Phase 5
+  `MissionRunner` (`turn`/`walk`/`wait`/`wait_for`/`interact`/`log`).
+- **complete** - watches the OCR'd objective text, prompt, subtitles and a
+  center-screen banner region for `story.completion_keywords`
+  ("mission passed", ...), then moves to the next profile.
+
+Failures and stage timeouts (`travel_timeout_s`, `objective_timeout_s`,
+`completion_timeout_s`) skip forward instead of parking the session, and the
+combat/survival gates pause the director without burning stage time (pause
+gaps longer than `pause_grace_s` are rebased out of the timers).
+
+Honor: `story.auto_greet` (default on) arms the prompt responder to greet
+every opportunity - the honor value itself is not readable from the HUD, so
+the strategy is to greet whenever a prompt appears.
+
+New perception: the `objective` HUD region (top-left) is edge/brightness
+detected and OCR'd into `GameState.mission.objective_text`; tune the box with
+`.\calibrate.ps1 -Hud` if objectives never appear.
+
+`story` is a primary driver - it conflicts with `mission`, `control` and `rl`
+(pick one). Example `config.yaml`:
+
+```yaml
+story:
+  enabled: true
+  auto_greet: true
+  completion_keywords: [mission passed, mission complete]
+  missions:
+    - name: first mission
+      legs: [[0.0, 120.0], [45.0, 60.0]]    # bearing/meters to the start
+      tasks:
+        - {kind: interact}
+        - {kind: wait, seconds: 2}
+```
+
+Route legs are dead-reckoned and real mission profiles need authoring +
+playtesting against the live game (see NOTES.md); horse mount/dismount travel
+is not implemented yet.
+
 ## Architecture
 
 ```
@@ -287,6 +334,8 @@ src/
     tasks.py           Phase 5 task model + config parser
     runner.py          Phase 5 mission executor (MISSION n/N status)
     respond.py         Phase 6 prompt responder (encounter -> key tap)
+  story/
+    runner.py          story director: travel -> objective -> complete -> next
   ai/
     threat.py          Phase 7 threat assessor (damage window, level ladder)
     rl/
@@ -304,7 +353,7 @@ tools/
   input_check.py       test keyboard/mouse injection
 docs/
   CONTROLS.md          full PC controls reference + agent key cross-map
-tests/                 517 tests (pytest)
+tests/                 542 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -424,6 +473,7 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | `safety`    | F12/F11/F10 bindings, watchdog stalls, startup grace, release rules |
 | `control`   | autopilot on/off, `mode` (script/route), movement keys, look sensitivity, `nav` legs/gains/stalls |
 | `mission`   | task list (`turn`/`walk`/`wait`/`wait_for`/`interact`/`log`), `loop` restart |
+| `story`     | story director: mission profiles (legs + tasks), completion keywords/region, stage timeouts, auto-greet (Mode 1 skeleton, off by default) |
 | `combat`    | self-defense on/off, engage thresholds, aim/fire/retreat clamps |
 | `survival`  | core-triggered remedies (key sequences, needs, cooldowns, hysteresis) |
 | `rl`        | learned-policy driver (mode, checkpoint/buffer paths, reward weights) |
@@ -486,6 +536,11 @@ synthetic backend ~24 fps, ~3 ms latency.
     reference (`docs/CONTROLS.md`) plus the `.\run.ps1 -ControlTest`
     guided harness that sends every agent input primitive live and
     records your verdict against the reference.
+12. **Story mode skeleton (done)** - NOTES Mode 1 director behind
+    `story.enabled`: travel/objective/completion stages over RoutePlanner +
+    MissionRunner, objective-region OCR into `GameState.mission.objective_text`,
+    completion keywords with banner OCR, stage timeouts, auto-greet honor
+    strategy. Mission profiles still need authoring against the live game.
 
 Each phase ships with tests and stays revertible: the safety layer and manual
 hotkeys are never bypassed by later phases.
@@ -513,7 +568,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 517 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 542 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 .\run.ps1 -Doctor                            # environment self-check
 .\run.ps1 -ControlTest                       # guided input verification

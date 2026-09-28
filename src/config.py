@@ -177,6 +177,7 @@ DEFAULT_HUD_REGIONS: dict[str, list[float]] = {
     "minimap": [0.004, 0.810, 0.100, 0.185],
     "prompt": [0.350, 0.720, 0.300, 0.120],
     "wanted": [0.870, 0.030, 0.110, 0.080],
+    "objective": [0.020, 0.055, 0.450, 0.070],
 }
 
 
@@ -191,6 +192,8 @@ class HudConfig:
     minimap_hist_threshold: float = 0.35
     prompt_min_edge_density: float = 0.035
     prompt_min_bright_frac: float = 0.01
+    objective_min_edge_density: float = 0.010
+    objective_min_bright_frac: float = 0.003
     wanted_min_blob_px: int = 12
     wanted_max_blob_px: int = 900
 
@@ -360,6 +363,29 @@ class RlConfig:
 
 
 @dataclass
+class StoryConfig:
+    """Story mode (NOTES Mode 1): scripted director over a mission list."""
+
+    enabled: bool = False               # off = director never runs
+    loop: bool = False                  # restart the mission list when it ends
+    auto_greet: bool = True             # greet every opportunity (honor strategy)
+    missions: list[dict[str, object]] = field(default_factory=list)
+    completion_keywords: list[str] = field(
+        default_factory=lambda: [
+            "mission passed", "mission complete", "mission completed",
+        ]
+    )
+    completion_region: list[float] = field(
+        default_factory=lambda: [0.25, 0.35, 0.50, 0.15]
+    )                                    # banner OCR box; [] disables
+    completion_every_n_frames: int = 5   # banner OCR throttle
+    travel_timeout_s: float = 600.0      # route leg stage budget
+    objective_timeout_s: float = 900.0   # task stage budget
+    completion_timeout_s: float = 60.0   # completion-watch budget
+    pause_grace_s: float = 15.0          # longer step gaps count as pause time
+
+
+@dataclass
 class DebugConfig:
     gui: bool = True
     window_name: str = "RDR2 AI - Debug"
@@ -401,6 +427,7 @@ class AppConfig:
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
     mission: MissionConfig = field(default_factory=MissionConfig)
+    story: StoryConfig = field(default_factory=StoryConfig)
     combat: CombatConfig = field(default_factory=CombatConfig)
     survival: SurvivalConfig = field(default_factory=SurvivalConfig)
     rl: RlConfig = field(default_factory=RlConfig)
@@ -552,6 +579,87 @@ class AppConfig:
                 parse_tasks(list(mission.tasks))
             except ValueError as exc:
                 problems.append(str(exc))
+        story = self.story
+        if story.enabled and not story.missions:
+            problems.append("story.enabled requires at least one story.missions entry")
+        for i, profile in enumerate(story.missions, start=1):
+            where = f"story.missions[{i}]"
+            if not isinstance(profile, dict):
+                problems.append(f"{where} must be a mapping")
+                continue
+            pname = profile.get("name")
+            if not isinstance(pname, str) or not pname.strip():
+                problems.append(f"{where}.name must be a non-empty string")
+            legs = profile.get("legs") or []
+            if not isinstance(legs, (list, tuple)):
+                problems.append(
+                    f"{where}.legs must be a list of [bearing, meters] pairs"
+                )
+            else:
+                for j, leg in enumerate(legs, start=1):
+                    if (
+                        not isinstance(leg, (list, tuple))
+                        or len(leg) != 2
+                        or not all(
+                            isinstance(v, (int, float)) and not isinstance(v, bool)
+                            for v in leg
+                        )
+                        or leg[1] < 0
+                    ):
+                        problems.append(
+                            f"{where}.legs[{j}] must be [bearing_deg, meters>=0]"
+                        )
+            tasks = profile.get("tasks") or []
+            if not isinstance(tasks, list):
+                problems.append(f"{where}.tasks must be a list of task mappings")
+            elif tasks:
+                from src.mission.tasks import parse_tasks  # lazy import again
+
+                try:
+                    parse_tasks(list(tasks))
+                except ValueError as exc:
+                    problems.append(f"{where}: {exc}")
+        if (
+            not isinstance(story.completion_keywords, list)
+            or any(
+                not isinstance(k, str) or not k.strip()
+                for k in story.completion_keywords
+            )
+        ):
+            problems.append("story.completion_keywords must be a list of strings")
+        region = story.completion_region
+        if region:
+            if (
+                not isinstance(region, (list, tuple))
+                or len(region) != 4
+                or not all(
+                    isinstance(v, (int, float)) and not isinstance(v, bool)
+                    for v in region
+                )
+                or region[2] <= 0
+                or region[3] <= 0
+                or any(v < 0 or v > 1 for v in region)
+            ):
+                problems.append(
+                    "story.completion_region must be [x, y, w, h] within 0..1 "
+                    "(w, h > 0) or [] to disable"
+                )
+        for sname in (
+            "travel_timeout_s", "objective_timeout_s",
+            "completion_timeout_s", "pause_grace_s",
+        ):
+            value = getattr(story, sname)
+            if (
+                not isinstance(value, (int, float)) or isinstance(value, bool)
+                or value <= 0
+            ):
+                problems.append(f"story.{sname} must be > 0")
+        if (
+            not isinstance(story.completion_every_n_frames, int)
+            or isinstance(story.completion_every_n_frames, bool)
+            or story.completion_every_n_frames < 1
+        ):
+            problems.append("story.completion_every_n_frames must be an int >= 1")
         combat = self.combat
         if combat.engage_min_wanted < 1:
             problems.append("combat.engage_min_wanted must be >= 1")
@@ -673,6 +781,18 @@ class AppConfig:
         if rl.enabled and self.control.enabled:
             problems.append(
                 "rl.enabled conflicts with control.enabled (pick one primary driver)"
+            )
+        if story.enabled and mission.enabled:
+            problems.append(
+                "story.enabled conflicts with mission.enabled (pick one primary driver)"
+            )
+        if story.enabled and self.control.enabled:
+            problems.append(
+                "story.enabled conflicts with control.enabled (pick one primary driver)"
+            )
+        if story.enabled and rl.enabled:
+            problems.append(
+                "story.enabled conflicts with rl.enabled (pick one primary driver)"
             )
         dlg = self.vision.dialogue
         region = dlg.region

@@ -160,3 +160,39 @@ def test_wanted_stars_flow_into_threat() -> None:
     perception.apply_to_state(state, perception.process(frame, 5))
     assert state.threat.wanted_level == 2
     assert state.threat.level == "wanted"
+
+
+def test_objective_text_flows_into_state() -> None:
+    cfg = VisionConfig()
+    cfg.ocr.every_n_frames = 1
+    perception = Perception(cfg, ocr=FakeOcr(text="Go to the sheriff"))
+    frame = _frame()
+    draw_prompt(frame, _boxes(cfg.hud)["objective"])
+    state = GameState()
+    perception.apply_to_state(state, perception.process(frame, 1))
+    assert state.mission.objective_text == "Go to the sheriff"
+    assert state.mission.active is True
+
+
+def test_objective_clears_when_region_empty() -> None:
+    cfg = VisionConfig()
+    cfg.ocr.every_n_frames = 1
+    perception = Perception(cfg, ocr=FakeOcr(text="Go to the sheriff"))
+    frame = _frame()
+    draw_prompt(frame, _boxes(cfg.hud)["objective"])
+    state = GameState()
+    perception.apply_to_state(state, perception.process(frame, 1))
+    assert state.mission.active is True
+    perception.apply_to_state(state, perception.process(_frame(), 2))
+    assert state.mission.objective_text is None
+    assert state.mission.active is False
+
+
+def test_objective_ocr_not_run_when_region_absent() -> None:
+    cfg = VisionConfig()
+    cfg.ocr.every_n_frames = 1
+    fake = FakeOcr()
+    perception = Perception(cfg, ocr=fake)
+    for i in range(3):
+        perception.process(_frame(), frame_id=i)
+    assert fake.calls == 0
