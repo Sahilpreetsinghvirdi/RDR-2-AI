@@ -107,6 +107,117 @@ def build_lines(status: AgentStatus) -> list[str]:
     return lines
 
 
+def card_lines(status: AgentStatus) -> list[tuple[str, str]]:
+    """Curated (text, kind) rows for the small status card.
+
+    Kinds: state, doing, msg, cores, threat, prompt, dialog, error,
+    warn, stats. Only rows with something to say are included.
+    """
+    rows = [("STATUS  " + status.state + f"  (phase {status.phase})", "state")]
+    doing = status.goal or "IDLE"
+    if status.action and status.action != "none":
+        doing += "  /  " + status.action
+    rows.append(("DOING   " + doing, "doing"))
+    if status.message:
+        rows.append(("MSG     " + status.message, "msg"))
+    rows.append(
+        (f"CORES   HP {_pct(status.hud_health)}  "
+         f"ST {_pct(status.hud_stamina)}  DE {_pct(status.hud_dead_eye)}",
+         "cores")
+    )
+    if status.threat_level != "none":
+        hot = status.threat_level in ("wanted", "under_fire")
+        rows.append((
+            f"THREAT  {status.threat_level}  wanted {status.threat_wanted}  "
+            f"fire {'Y' if status.threat_fire else 'N'}",
+            "alert" if hot else "threat",
+        ))
+    if status.hud_prompt_visible or status.hud_prompt:
+        rows.append(("PROMPT  " + (status.hud_prompt or "(reading...)"), "prompt"))
+    if status.dialogue_active or status.dialogue_text:
+        rows.append((
+            "SAYS    " + (status.dialogue_text or "(reading...)")
+            + (f"  [{status.dialogue_encounter}]" if status.dialogue_encounter else ""),
+            "dialog",
+        ))
+    if status.error:
+        rows.append(("ERROR   " + status.error, "error"))
+    if not status.window_focused:
+        rows.append(("Click the game window so input is accepted", "warn"))
+    rows.append(
+        (f"{status.capture_fps:.0f} fps  |  loop {status.loop_hz:.0f} Hz  |  "
+         f"ocr {status.ocr_engine}", "stats")
+    )
+    return rows
+
+
+_CARD_WIDTH = 400
+_CARD_ROW_H = 22
+_CARD_MARGIN = 12
+_CARD_MAX_ROWS = 13
+
+_CARD_STYLE: dict[str, tuple[float, tuple[int, int, int]]] = {
+    "state": (0.60, (80, 200, 80)),
+    "doing": (0.50, (235, 235, 235)),
+    "msg": (0.46, (200, 210, 230)),
+    "cores": (0.50, (235, 235, 235)),
+    "threat": (0.50, (235, 235, 235)),
+    "alert": (0.50, (0, 165, 255)),
+    "prompt": (0.46, (0, 255, 255)),
+    "dialog": (0.46, (200, 210, 230)),
+    "error": (0.50, (60, 60, 255)),
+    "warn": (0.50, (0, 255, 255)),
+    "stats": (0.45, (150, 150, 150)),
+}
+
+
+def _draw_card_text(canvas: np.ndarray, text: str, x: int, y: int,
+                    scale: float, color: tuple[int, int, int]) -> None:
+    cv2.putText(canvas, text, (x, y),
+                cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 2, cv2.LINE_AA)
+    cv2.putText(canvas, text, (x, y),
+                cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
+
+
+def build_card(status: AgentStatus, *, emergency: str = "F12",
+               pause: str = "F11", takeover: str = "F10",
+               waiting: bool = False) -> np.ndarray:
+    """Render the small status card (no game frame): title, rows, hotkeys."""
+    rows = card_lines(status)
+    if waiting:
+        rows.insert(1, ("Waiting for game frames...", "warn"))
+    wrapped: list[tuple[str, str]] = []
+    max_chars = (_CARD_WIDTH - 2 * _CARD_MARGIN) // 8
+    for text, kind in rows:
+        chunks = [text[i:i + max_chars] for i in range(0, len(text), max_chars)] or [""]
+        for chunk in chunks:
+            wrapped.append((chunk, kind))
+            if len(wrapped) >= _CARD_MAX_ROWS:
+                break
+        if len(wrapped) >= _CARD_MAX_ROWS:
+            break
+    height = (12 + 30 + 8 + len(wrapped) * _CARD_ROW_H + 10 + 24 + 10)
+    card = np.full((height, _CARD_WIDTH, 3), 22, dtype=np.uint8)
+    color = state_color(status.state)
+    cv2.rectangle(card, (0, 0), (_CARD_WIDTH - 1, 6), color, -1)
+
+    _draw_card_text(card, "RDR2 AI", _CARD_MARGIN, 36, 0.85, (255, 255, 255))
+
+    y = 36 + 8 + 16
+    for text, kind in wrapped:
+        scale, row_color = _CARD_STYLE.get(kind, (0.5, (235, 235, 235)))
+        if kind == "state":
+            row_color = color
+        _draw_card_text(card, text, _CARD_MARGIN, y, scale, row_color)
+        y += _CARD_ROW_H
+
+    footer = f"{emergency} stop  |  {pause} pause  |  {takeover} takeover"
+    cv2.line(card, (_CARD_MARGIN, y + 2),
+             (_CARD_WIDTH - _CARD_MARGIN, y + 2), (70, 70, 70), 1)
+    _draw_card_text(card, footer, _CARD_MARGIN, y + 22, 0.45, (170, 170, 170))
+    return card
+
+
 def draw_overlay(
     image: np.ndarray,
     status: AgentStatus,

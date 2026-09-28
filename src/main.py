@@ -264,7 +264,12 @@ def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
     recorder: SessionRecorder | None = None
     if cfg.recording.enabled:
         recorder = SessionRecorder(cfg.recording, cfg.resolve(cfg.recording.dir))
-    dashboard = Dashboard(cfg.debug)
+    dashboard = Dashboard(
+        cfg.debug,
+        emergency=cfg.safety.emergency_key,
+        pause=cfg.safety.pause_key,
+        takeover=cfg.safety.takeover_key,
+    )
     fast = FastPass(cfg.vision.fast)
     perception = Perception(cfg.vision, ocr=ocr_engine)
     game_state = GameState()

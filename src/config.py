@@ -421,6 +421,7 @@ class DebugConfig:
     render_fps: int = 20
     show_overlay: bool = True
     show_hud: bool = True
+    show_video: bool = False       # off = small status card, no game frame
     panel_width: int = 360
 
 
@@ -504,6 +505,8 @@ class AppConfig:
         _positive("safety.heartbeat_stall_s", self.safety.heartbeat_stall_s)
         _positive("telemetry.metrics_interval_s", self.telemetry.metrics_interval_s)
         _positive("capture.max_frame_age_ms", self.capture.max_frame_age_ms, (int,))
+        if not isinstance(self.debug.show_video, bool):
+            problems.append("debug.show_video must be a boolean")
 
         if self.capture.backend not in {"auto", "dxcam", "mss", "synthetic"}:
             problems.append(

@@ -28,7 +28,7 @@ code into the game, or interact with Red Dead Online.
   critical loop stalls, and a configurable startup grace period.
 - Streams structured telemetry: console logs, rotating log files,
   `logs/events.jsonl` (metrics, state transitions, shutdown summary), and a
-  debug dashboard window showing the captured frame, overlay, and live status.
+  small status-card window (state, what Arthur is doing, cores, hotkeys).
 - Optionally records frames and state to `recordings/` for dataset building.
 
 ### Phase 2 - perception (HUD reading)
@@ -380,7 +380,7 @@ src/
     logger.py          console + rotating file logs, event log
     recorder.py        frame/state recording with fps rate limiting
   ui/
-    dashboard.py       debug window (frame + overlay + status panel)
+    dashboard.py       small status card window (game frame only if debug.show_video)
     debug_overlay.py   HUD-style annotations drawn on the frame
   demo.py              Phase 1 input demonstration
   control/
@@ -417,7 +417,7 @@ tools/
   input_check.py       test keyboard/mouse injection
 docs/
   CONTROLS.md          full PC controls reference + agent key cross-map
-tests/                 621 tests (pytest)
+tests/                 630 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -543,7 +543,7 @@ All tunables live in `config.yaml`; source code must not hardcode them.
 | `rl`        | learned-policy driver (mode, checkpoint/buffer paths, reward weights) |
 | `brain`     | local vision-model driver (ollama model/host, cadence, staleness) - experimental, off by default |
 | `vision`    | `fast` pass, `hud` regions/thresholds, `world` estimators + minimap enemy blips, `dialogue` band/keywords/reactions, `ocr` engine/throttling |
-| `debug`     | dashboard window, `show_overlay`/`show_hud` boxes, panel width |
+| `debug`     | status card window, hotkey labels, `show_video` (frame+panel), `show_overlay`/`show_hud` boxes, panel width |
 | `recording` | fps, format, max frames, state jsonl |
 | `telemetry` | console/file logs, `events.jsonl`, metrics interval, log level |
 
@@ -643,7 +643,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 621 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 630 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 .\run.ps1 -Doctor                            # environment self-check
 .\run.ps1 -ControlTest                       # guided input verification

@@ -1,4 +1,4 @@
-"""Debug window: captured frame + overlay + side status panel."""
+"""Small status card window (no duplicated game frame unless enabled)."""
 
 from __future__ import annotations
 
@@ -10,18 +10,20 @@ import numpy as np
 from src.capture.screen_capture import FramePacket
 from src.config import DebugConfig
 from src.state.agent_status import AgentStatus
-from src.ui.debug_overlay import build_lines, draw_overlay, state_color
+from src.ui.debug_overlay import build_card, build_lines, draw_overlay, state_color
 
 log = logging.getLogger(__name__)
 
 
 class Dashboard:
-    """Renders the agent view. Fails safe: GUI errors disable the window only."""
+    """Renders the status card. Fails safe: GUI errors disable the window only."""
 
-    def __init__(self, cfg: DebugConfig) -> None:
+    def __init__(self, cfg: DebugConfig, *, emergency: str = "F12",
+                 pause: str = "F11", takeover: str = "F10") -> None:
         self._cfg = cfg
         self._disabled = not cfg.gui
         self._created = False
+        self._keys = (emergency, pause, takeover)
         self.shown = 0
         self.errors = 0
 
@@ -72,24 +74,23 @@ class Dashboard:
             return
         try:
             self._ensure_window()
-            if packet is None:
-                placeholder = np.full((540, 960, 3), 30, dtype=np.uint8)
-                cv2.putText(
-                    placeholder, "WAITING FOR FRAMES...", (40, 270),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (200, 200, 200), 2, cv2.LINE_AA,
-                )
-                frame = draw_overlay(placeholder, status)
-            else:
+            if self._cfg.show_video and packet is not None:
                 frame = packet.image
                 if self._cfg.show_overlay:
                     frame = draw_overlay(frame, status)
                 else:
                     frame = frame.copy()
-            panel = self._panel(status, frame.shape[0])
-            if panel.shape[0] != frame.shape[0]:
-                panel = cv2.resize(panel, (panel.shape[1], frame.shape[0]))
-            combined = np.hstack([frame, panel])
-            cv2.imshow(self._cfg.window_name, combined)
+                panel = self._panel(status, frame.shape[0])
+                if panel.shape[0] != frame.shape[0]:
+                    panel = cv2.resize(panel, (panel.shape[1], frame.shape[0]))
+                view = np.hstack([frame, panel])
+            else:
+                emergency, pause, takeover = self._keys
+                view = build_card(
+                    status, emergency=emergency, pause=pause,
+                    takeover=takeover, waiting=packet is None,
+                )
+            cv2.imshow(self._cfg.window_name, view)
             cv2.waitKey(1)
             self.shown += 1
         except Exception as exc:

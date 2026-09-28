@@ -1,0 +1,84 @@
+"""Small status card: layout, content rows, config."""
+
+from __future__ import annotations
+
+from src.config import AppConfig, ConfigError, DebugConfig
+from src.state.agent_status import AgentStatus
+from src.ui.dashboard import Dashboard
+from src.ui.debug_overlay import build_card, card_lines
+
+
+def _busy() -> AgentStatus:
+    return AgentStatus(
+        state="RUNNING", phase=11, goal="STORY 1/3 TRAVEL",
+        action="nearest:+045deg", message="riding toward the marker",
+        hud_health=0.82, hud_stamina=0.64, hud_dead_eye=0.9,
+        threat_level="wanted", threat_wanted=2,
+        hud_prompt="PRESS E TO MOUNT", hud_prompt_visible=True,
+        capture_fps=11.4, loop_hz=10.0, window_focused=True,
+    )
+
+
+def test_card_is_small_and_fixed_width() -> None:
+    card = build_card(_busy())
+    assert card.shape[1] == 400
+    assert card.dtype.name == "uint8"
+    assert card.shape[0] < 500
+
+
+def test_card_border_follows_state() -> None:
+    running = build_card(AgentStatus(state="RUNNING"))
+    error = build_card(AgentStatus(state="ERROR"))
+    assert running.shape == error.shape
+    assert running[3, 200].tolist() != error[3, 200].tolist()
+
+
+def test_card_waiting_flag_adds_row() -> None:
+    plain = build_card(AgentStatus())
+    waiting = build_card(AgentStatus(), waiting=True)
+    assert waiting.shape[0] > plain.shape[0]
+
+
+def test_card_focus_hint() -> None:
+    assert any("Click the game window" in text for text, _ in card_lines(AgentStatus()))
+    focused = AgentStatus(window_focused=True)
+    assert not any("Click the game window" in text for text, _ in card_lines(focused))
+
+
+def test_card_error_row() -> None:
+    kinds = [kind for _, kind in card_lines(AgentStatus(error="boom"))]
+    assert "error" in kinds
+    kinds = [kind for _, kind in card_lines(AgentStatus())]
+    assert "error" not in kinds
+
+
+def test_card_survives_long_message() -> None:
+    card = build_card(AgentStatus(state="ERROR", message="x" * 500, error="y" * 500))
+    assert card.shape[1] == 400
+    assert card.shape[0] <= 420
+
+
+def test_card_threat_only_when_present() -> None:
+    kinds = [kind for _, kind in card_lines(AgentStatus(threat_level="none"))]
+    assert "threat" not in kinds and "alert" not in kinds
+    kinds = [kind for _, kind in card_lines(AgentStatus(threat_level="wanted"))]
+    assert "alert" in kinds
+
+
+def test_show_video_defaults_off_and_validated() -> None:
+    assert DebugConfig().show_video is False
+    cfg = AppConfig()
+    cfg.debug.show_video = "yes"  # type: ignore[assignment]
+    try:
+        cfg.validate()
+    except ConfigError as exc:
+        assert "debug.show_video" in str(exc)
+    else:
+        raise AssertionError("expected ConfigError")
+
+
+def test_dashboard_disabled_is_noop() -> None:
+    dash = Dashboard(DebugConfig(gui=False))
+    dash.show(None, AgentStatus())
+    assert dash.shown == 0
+    assert dash.enabled is False
