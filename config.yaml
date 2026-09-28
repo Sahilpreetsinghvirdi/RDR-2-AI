@@ -129,6 +129,12 @@ story:
   #   legs: [[0.0, 40.0]]
   #   tasks:
   #     - {kind: wait_for, field: dialogue.encounter, equals: greet, timeout_s: 60}
+  # - name: closest mission, whoever it is  # chase the nearest marker
+  #   nearest: true                          # no legs: scan, chase, identify
+  # - name: dutch mission                   # reached via title match
+  #   titles: [dutch, money lending]        # keywords from the title card
+  #   tasks:
+  #     - {kind: interact}
   # - name: save game             # pause menu save (calibrate arrows in game!)
   #   tasks:
   #     - {kind: key, name: esc}        # pause menu

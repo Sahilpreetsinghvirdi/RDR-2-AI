@@ -9,6 +9,7 @@ acts on a guess.
 
 from __future__ import annotations
 
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -249,13 +250,9 @@ class Perception:
             state.threat.enemy_offset = (
                 minimap.enemy_offset if minimap.enemy_dots else None
             )
-            if minimap.marker_present:
-                state.mission.objective_location_estimate = (
-                    list(minimap.marker_offset)
-                    if minimap.marker_offset else None
-                )
-            else:
-                state.mission.objective_location_estimate = None
+            state.mission.objective_location_estimate = (
+                _nearest_marker(minimap.marker_blobs, wc.marker_center_deadzone)
+            )
 
         sky = world.sky
         if sky is not None and sky.present and sky.time_of_day:
@@ -350,3 +347,24 @@ def _gauge_value(hud: HudDetection, key: str) -> float | None:
     if reading is None:
         return None
     return reading.value
+
+
+def _nearest_marker(
+    blobs: list[list[float]] | None, deadzone: float
+) -> list[float] | None:
+    """Nearest marker blob to the minimap centre, excluding Arthur's arrow."""
+    if not blobs:
+        return None
+    best: list[float] | None = None
+    best_key: tuple[float, float] | None = None
+    for blob in blobs:
+        if len(blob) != 3:
+            continue
+        dist = math.hypot(float(blob[0]), float(blob[1]))
+        if dist < deadzone:
+            continue
+        key = (dist, -float(blob[2]))
+        if best_key is None or key < best_key:
+            best_key = key
+            best = [float(blob[0]), float(blob[1])]
+    return best

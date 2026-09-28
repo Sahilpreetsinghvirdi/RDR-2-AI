@@ -1,13 +1,14 @@
 # Notes: Two Modes
 
 Status: **Mode 1 implemented** - `StoryRunner` behind
-`story.enabled = false` (mount/travel/dismount/objective/roam/complete
-stages, objective-region OCR, completion keywords + banner OCR, stage
-timeouts, marker homing, stranger/camp profiles, auto-greet) plus Mode 2
+`story.enabled = false` (mount/travel/dismount/objective/roam/identify/
+complete stages, objective-region OCR, completion keywords + banner OCR,
+stage timeouts, marker homing, `nearest` chasing with title-card
+identification, stranger/camp profiles, auto-greet) plus Mode 2
 (`.\run.ps1 -Interactive`: pick a mission, free roam, or observe) and
 `agent.mode`. Still needs live-game work: authored real-mission profiles
-with calibrated legs (starters are commented in `config.yaml`). See the
-README "Story mode" section.
+with calibrated legs and title keywords (starters are commented in
+`config.yaml`). See the README "Story mode" section.
 
 ## Mode 1 - Full Autonomous Story Mode
 The AI plays the story end-to-end on its own.

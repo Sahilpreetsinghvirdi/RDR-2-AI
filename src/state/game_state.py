@@ -62,6 +62,9 @@ class MissionState:
     active: bool = False
     objective_text: str | None = None
     objective_type: str | None = None
+    # Nearest minimap marker to Arthur, excluding his own arrow: [dx, dy]
+    # in -0.5..0.5. The marker's identity (Dutch, John, stranger, waypoint)
+    # is NOT readable - arrival plus the mission title card identifies it.
     objective_location_estimate: list[float] | None = None
     prompt_text: str | None = None
     prompt_action: str | None = None

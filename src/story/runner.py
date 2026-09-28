@@ -34,7 +34,8 @@ from src.vision.ocr import OcrEngine
 
 log = logging.getLogger(__name__)
 
-_STAGES = ("mount", "travel", "dismount", "objective", "roam", "complete", "done")
+_STAGES = ("mount", "travel", "dismount", "objective", "roam", "identify",
+            "complete", "done")
 
 
 class StoryRunner:
@@ -72,6 +73,9 @@ class StoryRunner:
         self._mounted: ControlConfig | None = None
         self._detour_from: int | None = None
         self._marker_frames = 0
+        self._marker_seen = False
+        self._identify_until = 0.0
+        self._identified = False
         self._mount_whistled = False
         self._mount_settle_until = 0.0
         self._heading = float(control.nav.start_heading_deg)
@@ -127,6 +131,8 @@ class StoryRunner:
             self._step_objective(now, status, frame, game_state)
         elif self._stage == "roam":
             self._step_roam(now, status)
+        elif self._stage == "identify":
+            self._step_identify(now, status, frame, game_state)
         elif self._stage == "complete":
             self._step_complete(now, status, frame, game_state)
         if self._stage != "done":
@@ -146,6 +152,7 @@ class StoryRunner:
         self._mission = None
         self._mounted = None
         self._marker_frames = 0
+        self._marker_seen = False
         self._mount_whistled = False
         self._mount_settle_until = 0.0
         self._heading = float(self._control.nav.start_heading_deg)
@@ -155,7 +162,10 @@ class StoryRunner:
         self._roam_walked = 0.0
         self._roam_turn_remaining = 0.0
         self._roam_prev = None
-        detour = self._opportunistic_target(game_state)
+        detour = None
+        if not self._identified:
+            detour = self._opportunistic_target(game_state)
+        self._identified = False
         if detour is not None:
             self._detour_from = self._index
             self._index = detour
@@ -204,7 +214,8 @@ class StoryRunner:
 
     def _after_mount(self, now: float) -> None:
         self._locomotion.stop()
-        if self._legs:
+        profile = self._profiles[self._index]
+        if self._legs or profile.get("nearest"):
             self._goto("travel", now)
         elif self._tasks:
             self._goto("objective", now)
@@ -264,6 +275,10 @@ class StoryRunner:
         self, now: float, status: StatusTracker,
         frame: np.ndarray | None, game_state: GameState | None,
     ) -> None:
+        profile = self._profiles[self._index]
+        if profile.get("nearest"):
+            self._step_nearest(now, status, game_state)
+            return
         if self._route is None:
             self._route = RoutePlanner(
                 self._driver_control, self._locomotion, self._minimap_frac
@@ -279,6 +294,8 @@ class StoryRunner:
             self._route = None
             if self._should_dismount():
                 self._goto("dismount", now)
+            elif self._should_identify():
+                self._enter_identify(now)
             elif self._tasks:
                 self._goto("objective", now)
             else:
@@ -354,7 +371,9 @@ class StoryRunner:
             self._mounted = None
             self._locomotion.stop()
             log.info("story: dismounted")
-            if self._tasks:
+            if self._should_identify():
+                self._enter_identify(now)
+            elif self._tasks:
                 self._goto("objective", now)
             else:
                 self._goto("complete", now)
@@ -386,6 +405,123 @@ class StoryRunner:
             status.update(action="roam:leg done")
         else:
             status.update(action=f"roam:walk {self._roam_walked:.1f}m")
+
+    def _step_nearest(
+        self, now: float, status: StatusTracker, game_state: GameState | None
+    ) -> None:
+        """Chase the nearest minimap marker instead of following legs."""
+        if now - self._stage_started >= self._cfg.travel_timeout_s:
+            self._fail_advance(
+                f"no marker reached after {self._cfg.travel_timeout_s:.0f}s",
+                now,
+            )
+            return
+        estimate = (
+            game_state.mission.objective_location_estimate
+            if game_state is not None else None
+        )
+        if estimate and len(estimate) == 2:
+            self._marker_frames += 1
+        else:
+            self._marker_frames = 0
+            estimate = None
+        if estimate is None:
+            if self._marker_seen:
+                self._arrive_from_nearest(now, "marker consumed")
+                return
+            self._locomotion.turn(self._control.max_turn_deg_per_tick)
+            status.update(action="nearest:scan")
+            return
+        if self._marker_frames < self._cfg.marker_persist_frames:
+            status.update(action="nearest:acquire")
+            return
+        self._marker_seen = True
+        dx, dy = float(estimate[0]), float(estimate[1])
+        if math.hypot(dx, dy) <= self._cfg.marker_arrival_radius:
+            self._arrive_from_nearest(now, "marker reached")
+            return
+        angle = math.degrees(math.atan2(dx, -dy))
+        cap = self._control.max_turn_deg_per_tick
+        delta = max(-cap, min(angle, cap))
+        self._locomotion.turn(delta)
+        if not self._locomotion.active:
+            self._locomotion.move("forward", self._control.nav.step_s)
+        status.update(action=f"nearest:{angle:+.0f}deg")
+
+    def _arrive_from_nearest(self, now: float, reason: str) -> None:
+        log.info("story: mission '%s' - nearest marker %s", self._name, reason)
+        self._locomotion.stop()
+        self._marker_seen = False
+        self._enter_identify(now)
+
+    def _enter_identify(self, now: float) -> None:
+        self._goto("identify", now)
+        self._identify_until = now + self._cfg.title_wait_s
+
+    def _should_identify(self) -> bool:
+        titles = self._profiles[self._index].get("titles") or []
+        return isinstance(titles, list) and len(titles) > 0
+
+    def _step_identify(
+        self, now: float, status: StatusTracker,
+        frame: np.ndarray | None, game_state: GameState | None,
+    ) -> None:
+        status.update(action="identify:title")
+        hit = self._match_title(game_state, frame)
+        if hit is not None:
+            index, title = hit
+            if index != self._index:
+                log.info(
+                    "story: title %r matched mission '%s'",
+                    title, self._profiles[index].get("name"),
+                )
+                self._index = index
+                self._detour_from = None
+                self._identified = True
+                self._pending_begin = True
+                return
+            log.info("story: title %r confirmed mission '%s'", title, self._name)
+            self._enter_post_identify(now)
+            return
+        if now >= self._identify_until:
+            log.info(
+                "story: title not recognized - continuing '%s'", self._name
+            )
+            self._enter_post_identify(now)
+
+    def _match_title(
+        self, game_state: GameState | None, frame: np.ndarray | None
+    ) -> tuple[int, str] | None:
+        parts: list[str] = []
+        if game_state is not None:
+            texts = (
+                game_state.mission.objective_text,
+                game_state.mission.prompt_text,
+                game_state.dialogue.text,
+            )
+            parts.extend(t for t in texts if t)
+        banner = self._read_banner(frame)
+        if banner:
+            parts.append(banner)
+        if not parts:
+            return None
+        joined = " ".join(parts).lower()
+        for i, profile in enumerate(self._profiles):
+            titles = profile.get("titles") or []
+            if not isinstance(titles, list):
+                continue
+            for title in titles:
+                needle = str(title).strip().lower()
+                if needle and needle in joined:
+                    return i, str(title)
+        return None
+
+    def _enter_post_identify(self, now: float) -> None:
+        if self._tasks:
+            self._goto("objective", now)
+        else:
+            self._goto("complete", now)
+        log.info("story: mission '%s' - stage %s", self._name, self._stage)
 
     def _step_objective(
         self,
@@ -534,4 +670,7 @@ class StoryRunner:
             gap = now - self._last_step
             if gap > self._cfg.pause_grace_s:
                 self._stage_started += gap
+                self._identify_until += gap
+                self._mount_settle_until += gap
+                self._dismount_until += gap
         self._last_step = now

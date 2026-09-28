@@ -115,6 +115,18 @@ def test_minimap_no_marker_on_plain_map() -> None:
     assert minimap.marker_offset is None
 
 
+def test_minimap_reports_all_marker_blobs() -> None:
+    frame = _frame(world=120)
+    x, y, w, h = _minimap_box()
+    cv2.circle(frame, (x + w // 2, y + h // 2), 6, (255, 255, 255), -1)
+    cv2.circle(frame, (x + w // 2 + 40, y + h // 2), 8, (255, 255, 255), -1)
+    minimap = _reader().process(frame, _minimap_box()).minimap
+    assert minimap is not None and minimap.marker_present
+    assert len(minimap.marker_blobs) == 2
+    assert minimap.marker_offset is not None
+    assert abs(minimap.marker_offset[0] - 40 / w) <= 0.02
+
+
 def test_minimap_water_fraction() -> None:
     frame = _frame(world=120)
     x, y, w, h = _minimap_box()

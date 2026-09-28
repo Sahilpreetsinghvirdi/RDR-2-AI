@@ -227,6 +227,7 @@ class WorldConfig:
     marker_bright: int = 200
     marker_min_blob_px: int = 8
     marker_max_blob_px: int = 600
+    marker_center_deadzone: float = 0.08  # minimap fraction around Arthur's own arrow
     road_luma: float = 150.0
     water_min_frac: float = 0.04
     road_min_frac: float = 0.03
@@ -392,6 +393,8 @@ class StoryConfig:
     dismount_wait_s: float = 2.5         # settle time after dismounting
     roam_leg_m: float = 30.0             # wander straight-line distance
     roam_turn_deg: float = 60.0          # wander turn at the end of each leg
+    title_wait_s: float = 8.0            # title-card watch after marker arrival
+    marker_arrival_radius: float = 0.06  # minimap fraction counted as arrived
     marker_persist_frames: int = 3       # consecutive frames to trust a marker
 
 
@@ -529,6 +532,8 @@ class AppConfig:
         wcfg = self.vision.world
         if not 0 <= wcfg.enemy_red_min <= 255:
             problems.append("vision.world.enemy_red_min must be within 0..255")
+        if not 0.0 <= wcfg.marker_center_deadzone <= 0.5:
+            problems.append("vision.world.marker_center_deadzone must be within 0..0.5")
         if not 0 <= wcfg.enemy_red_chroma <= 255:
             problems.append("vision.world.enemy_red_chroma must be within 0..255")
         if wcfg.enemy_min_blob_px < 1 or wcfg.enemy_max_blob_px < wcfg.enemy_min_blob_px:
@@ -672,9 +677,14 @@ class AppConfig:
                 problems.append(
                     f"{where}.kind must be story|stranger|camp, got {kind!r}"
                 )
-            for flag in ("mount", "seek_marker", "roam", "dismount"):
+            for flag in ("mount", "seek_marker", "roam", "dismount", "nearest"):
                 if flag in profile and not isinstance(profile[flag], bool):
                     problems.append(f"{where}.{flag} must be a boolean")
+            titles = profile.get("titles") or []
+            if not isinstance(titles, list) or any(
+                not isinstance(t, str) or not t.strip() for t in titles
+            ):
+                problems.append(f"{where}.titles must be a list of strings")
             bearing = profile.get("dismount_bearing")
             if bearing is not None and (
                 not isinstance(bearing, (int, float))
@@ -711,6 +721,7 @@ class AppConfig:
             "completion_timeout_s", "pause_grace_s",
             "mount_timeout_s", "mount_wait_s", "mounted_speed_mps",
             "dismount_wait_s", "roam_leg_m", "roam_turn_deg",
+            "title_wait_s",
         ):
             value = getattr(story, sname)
             if (
@@ -718,6 +729,14 @@ class AppConfig:
                 or value <= 0
             ):
                 problems.append(f"story.{sname} must be > 0")
+        if (
+            not isinstance(story.marker_arrival_radius, (int, float))
+            or isinstance(story.marker_arrival_radius, bool)
+            or not 0.0 < story.marker_arrival_radius <= 0.5
+        ):
+            problems.append(
+                "story.marker_arrival_radius must be within 0..0.5 (exclusive of 0)"
+            )
         if (
             not isinstance(story.marker_persist_frames, int)
             or isinstance(story.marker_persist_frames, bool)

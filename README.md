@@ -241,7 +241,7 @@ code into the game, or interact with Red Dead Online.
 
 `src/story/runner.py` (NOTES Mode 1) plays a configured mission list
 end-to-end behind the disabled-by-default `story.enabled` flag (or
-`.\run.ps1 -Story`). Per mission the director runs up to four stages, then
+`.\run.ps1 -Story`). Per mission the director runs stages, then
 advances:
 
 - **mount** (optional, `mount: true`) - taps the horse whistle (`control.keys`
@@ -252,7 +252,16 @@ advances:
   Phase 4 `RoutePlanner` (minimap stall detection included). With
   `seek_marker: true` the heading is continuously corrected toward a
   persistent minimap marker (the gold mission/stranger blip), so travel homes
-  in like a human following the map instead of pure dead reckoning.
+  in like a human following the map instead of pure dead reckoning. With
+  `nearest: true` there are no legs at all: Arthur turns to scan for markers
+  and chases the nearest one - this is how he goes to the closest mission
+  (Dutch over John) instead of config order.
+- **identify** - after reaching a marker, reads the mission title card
+  (banner OCR plus objective/prompt/subtitle text) and matches it against
+  every profile's `titles:` list. On a match Arthur jumps to that mission's
+  profile and runs its script; otherwise he continues with the current one.
+  Identity is only known at arrival: markers are anonymous blobs until the
+  title card names them.
 - **objective** - runs the profile's `tasks` through the Phase 5
   `MissionRunner` (`turn`/`walk`/`wait`/`wait_for`/`interact`/`key`/`log`;
   `key` taps any `control.keys` role, e.g. `{key: {name: whistle}}`).
@@ -299,6 +308,13 @@ story:
     - name: stranger on the road
       kind: stranger
       legs: [[10.0, 40.0]]
+    - name: closest mission, whoever it is
+      nearest: true
+      titles: []                              # identify by others' titles only
+    - name: dutch mission
+      titles: [dutch, money lending]          # matched from the title card
+      tasks:
+        - {kind: interact}
 ```
 
 Route legs are dead-reckoned: stand Arthur at the start, face the target,
@@ -377,7 +393,7 @@ tools/
   input_check.py       test keyboard/mouse injection
 docs/
   CONTROLS.md          full PC controls reference + agent key cross-map
-tests/                 592 tests (pytest)
+tests/                 604 tests (pytest)
 ```
 
 Control flow: `capture thread -> frame buffer -> main loop (state snapshot,
@@ -562,13 +578,14 @@ synthetic backend ~24 fps, ~3 ms latency.
     records your verdict against the reference.
 12. **Story mode (done)** - NOTES Mode 1 director behind
     `story.enabled` (or `.\run.ps1 -Story`): mount/travel/dismount/
-    objective/roam/completion stages over whistle + RoutePlanner +
+    objective/roam/identify/completion stages over whistle + RoutePlanner +
     MissionRunner, objective-region OCR, completion keywords with banner
-    OCR, stage timeouts, marker homing (`seek_marker`), stranger/camp
-    profiles with opportunistic detours, auto-greet honor strategy; plus
-    Mode 2 (`.\run.ps1 -Interactive`: pick a mission, free roam, observe)
-    and `agent.mode`. Starter profiles live commented in `config.yaml` -
-    legs still need in-game calibration.
+    OCR, stage timeouts, marker homing (`seek_marker`), nearest-marker
+    chasing (`nearest`) with title-card identification (`titles`),
+    stranger/camp profiles with opportunistic detours, auto-greet honor
+    strategy; plus Mode 2 (`.\run.ps1 -Interactive`: pick a mission,
+    free roam, observe) and `agent.mode`. Starter profiles live commented
+    in `config.yaml` - legs still need in-game calibration.
 
 Each phase ships with tests and stays revertible: the safety layer and manual
 hotkeys are never bypassed by later phases.
@@ -596,7 +613,7 @@ hotkeys are never bypassed by later phases.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 592 tests
+.\.venv\Scripts\python.exe -m pytest -q      # 604 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
 .\run.ps1 -Doctor                            # environment self-check
 .\run.ps1 -ControlTest                       # guided input verification

@@ -32,6 +32,9 @@ class MinimapReading:
     marker_present: bool = False
     marker_bbox: list[int] | None = None
     marker_offset: list[float] | None = None  # dx, dy in -0.5..0.5
+    # Every bright blob: [dx, dy, area_px]. Used to pick the nearest
+    # marker; the largest one stays the legacy marker_present reading.
+    marker_blobs: list[list[float]] = field(default_factory=list)
     enemy_dots: int | None = None     # None = minimap too small to read
     enemy_offset: list[float] | None = None  # nearest red blip, dx/dy in -0.5..0.5
     water_frac: float = 0.0
@@ -169,25 +172,32 @@ def _read_minimap(
     sub = gray[sh0:sh1, sw0:sw1]
     _, binary = cv2.threshold(sub, cfg.marker_bright, 255, cv2.THRESH_BINARY)
     n_labels, _, stats, centroids = cv2.connectedComponentsWithStats(binary, 8)
-    best = -1
-    best_area = 0
+    blobs: list[tuple[int, float, float, float]] = []
     for i in range(1, n_labels):
         area = int(stats[i, cv2.CC_STAT_AREA])
-        if cfg.marker_min_blob_px <= area <= cfg.marker_max_blob_px and area > best_area:
-            best = i
-            best_area = area
-    if best >= 0:
-        cx = float(centroids[best][0]) + sw0
-        cy = float(centroids[best][1]) + sh0
+        if cfg.marker_min_blob_px <= area <= cfg.marker_max_blob_px:
+            blobs.append((
+                i,
+                float(centroids[i][0]) + sw0,
+                float(centroids[i][1]) + sh0,
+                float(area),
+            ))
+    for _, cx, cy, area in blobs:
+        reading.marker_blobs.append([
+            round(cx / w - 0.5, 3), round(cy / h - 0.5, 3), round(area, 1),
+        ])
+    best = max(blobs, key=lambda b: b[3], default=None)
+    if best is not None:
+        label, cx, cy, _ = best
         reading.marker_present = True
         reading.marker_offset = [
             round(cx / w - 0.5, 3), round(cy / h - 0.5, 3),
         ]
         reading.marker_bbox = [
-            int(stats[best, cv2.CC_STAT_LEFT]) + sw0,
-            int(stats[best, cv2.CC_STAT_TOP]) + sh0,
-            int(stats[best, cv2.CC_STAT_WIDTH]),
-            int(stats[best, cv2.CC_STAT_HEIGHT]),
+            int(stats[label, cv2.CC_STAT_LEFT]) + sw0,
+            int(stats[label, cv2.CC_STAT_TOP]) + sh0,
+            int(stats[label, cv2.CC_STAT_WIDTH]),
+            int(stats[label, cv2.CC_STAT_HEIGHT]),
         ]
         reading.confidence = 0.7
     else:

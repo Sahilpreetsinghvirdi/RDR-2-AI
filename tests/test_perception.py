@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from src.config import VisionConfig
 from src.state.game_state import GameState
@@ -169,12 +170,51 @@ def test_marker_offset_flows_into_objective_estimate() -> None:
     perception = Perception(cfg, ocr=NullOcr())
     frame = _frame()
     x, y, w, h = _boxes(cfg.hud)["minimap"]
+    cv2.circle(
+        frame[y:y + h, x:x + w], (w // 2 + 40, h // 2), 6, (255, 255, 255), -1
+    )
+    state = GameState()
+    perception.apply_to_state(state, perception.process(frame, 1))
+    estimate = state.mission.objective_location_estimate
+    assert estimate is not None
+    assert estimate[0] == pytest.approx(40 / w, abs=0.02)
+    assert estimate[1] == pytest.approx(0.0, abs=0.02)
+    perception.apply_to_state(state, perception.process(_frame(), 2))
+    assert state.mission.objective_location_estimate is None
+
+
+def test_center_blob_is_arthurs_arrow_not_a_target() -> None:
+    import cv2
+
+    cfg = VisionConfig()
+    perception = Perception(cfg, ocr=NullOcr())
+    frame = _frame()
+    x, y, w, h = _boxes(cfg.hud)["minimap"]
     cv2.circle(frame[y:y + h, x:x + w], (w // 2, h // 2), 6, (255, 255, 255), -1)
     state = GameState()
     perception.apply_to_state(state, perception.process(frame, 1))
-    assert state.mission.objective_location_estimate == [0.0, 0.0]
-    perception.apply_to_state(state, perception.process(_frame(), 2))
     assert state.mission.objective_location_estimate is None
+
+
+def test_estimate_picks_nearest_marker_not_largest() -> None:
+    import cv2
+
+    cfg = VisionConfig()
+    perception = Perception(cfg, ocr=NullOcr())
+    frame = _frame()
+    x, y, w, h = _boxes(cfg.hud)["minimap"]
+    cv2.circle(
+        frame[y:y + h, x:x + w], (w // 2 + 20, h // 2), 6, (255, 255, 255), -1
+    )
+    cv2.circle(
+        frame[y:y + h, x:x + w], (w // 2 + 40, h // 2), 8, (255, 255, 255), -1
+    )
+    state = GameState()
+    perception.apply_to_state(state, perception.process(frame, 1))
+    estimate = state.mission.objective_location_estimate
+    assert estimate is not None
+    assert estimate[0] == pytest.approx(20 / w, abs=0.02)
+    assert estimate[1] == pytest.approx(0.0, abs=0.02)
 
 
 def test_objective_text_flows_into_state() -> None:

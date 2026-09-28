@@ -644,3 +644,166 @@ def test_roam_profile_validated() -> None:
     cfg.story = _story_cfg(missions=[{"name": "r", "roam": "yes"}])
     with pytest.raises(ConfigError, match=r"\.roam must be a boolean"):
         cfg.validate()
+
+
+def _nearest_cfg(**kwargs: object) -> StoryConfig:
+    base: dict[str, object] = {
+        "enabled": True,
+        "pause_grace_s": 3600.0,
+        "marker_persist_frames": 2,
+        "missions": [{"name": "hunt", "nearest": True}],
+    }
+    base.update(kwargs)
+    return StoryConfig(**base)  # type: ignore[arg-type]
+
+
+def test_nearest_chases_persistent_marker() -> None:
+    runner = _runner(_nearest_cfg())
+    status = _status()
+    state = GameState()
+    state.mission.objective_location_estimate = [0.3, -0.3]
+    runner.step(0.0, status, None, state)
+    assert runner.stage == "travel"
+    runner.step(0.1, status, None, state)
+    assert runner._marker_seen is True  # noqa: SLF001
+    assert [round(t, 1) for t in _loco(runner).turns] == [30.0]
+    assert _loco(runner).moves, "nearest never walked"
+
+
+def _loco(runner: StoryRunner) -> FakeLocomotion:
+    return runner._locomotion  # type: ignore[return-value]  # noqa: SLF001
+
+
+def test_nearest_scans_when_no_marker() -> None:
+    runner = _runner(_nearest_cfg())
+    status = _status()
+    runner.step(0.0, status, None, GameState())
+    assert runner.stage == "travel"
+    assert _loco(runner).turns == [pytest.approx(30.0)]
+    assert runner.done is False
+
+
+def test_nearest_arrives_when_marker_consumed() -> None:
+    runner = _runner(_nearest_cfg(title_wait_s=1.0))
+    status = _status()
+    state = GameState()
+    state.mission.objective_location_estimate = [0.3, -0.3]
+    runner.step(0.0, status, None, state)
+    runner.step(0.1, status, None, state)
+    state.mission.objective_location_estimate = None
+    runner.step(0.2, status, None, state)
+    assert runner.stage == "identify"
+    runner.step(2.0, status, None, state)
+    assert runner.stage == "complete"
+
+
+def test_nearest_arrives_inside_radius() -> None:
+    runner = _runner(_nearest_cfg(marker_persist_frames=1))
+    status = _status()
+    state = GameState()
+    state.mission.objective_location_estimate = [0.02, -0.02]
+    runner.step(0.0, status, None, state)
+    assert runner.stage == "identify"
+
+
+def test_nearest_timeout_skips_forward() -> None:
+    cfg = _nearest_cfg(
+        travel_timeout_s=1.0,
+        missions=[
+            {"name": "a", "nearest": True},
+            {"name": "b", "legs": []},
+        ],
+    )
+    runner = _runner(cfg)
+    status = _status()
+    runner.step(0.0, status, None, GameState())
+    runner.step(2.0, status, None, GameState())
+    assert runner.index == 1
+
+
+def test_identify_jumps_to_titled_profile() -> None:
+    cfg = _nearest_cfg(
+        title_wait_s=10.0,
+        missions=[
+            {"name": "scout", "nearest": True},
+            {"name": "dutch", "titles": ["dutch"], "tasks": []},
+        ],
+    )
+    runner = _runner(cfg)
+    status = _status()
+    state = GameState()
+    state.mission.objective_location_estimate = [0.3, -0.3]
+    runner.step(0.0, status, None, state)
+    runner.step(0.1, status, None, state)
+    state.mission.objective_location_estimate = None
+    runner.step(0.2, status, None, state)
+    assert runner.stage == "identify"
+    state.mission.prompt_text = "Ride out with Dutch"
+    runner.step(0.3, status, None, state)
+    assert runner.index == 1
+    runner.step(0.4, status, None, state)
+    assert runner.stage == "complete"
+    assert runner.index == 1
+
+
+def test_identify_confirms_own_profile() -> None:
+    cfg = _story_cfg(missions=[{
+        "name": "dutch", "legs": [[0.0, 5.0]], "titles": ["dutch"],
+        "tasks": [{"kind": "log", "text": "go"}],
+    }])
+    runner = _runner(cfg)
+    status = _status()
+    state = GameState()
+    runner.step(0.0, status, None, state)
+    assert runner.stage == "identify"
+    state.mission.prompt_text = "Follow Dutch"
+    runner.step(0.1, status, None, state)
+    assert runner.stage == "objective"
+    runner.step(0.2, status, None, state)
+    assert len(FakeMission.instances) == 1
+
+
+def test_identify_timeout_continues() -> None:
+    cfg = _story_cfg(
+        title_wait_s=0.5,
+        missions=[{
+            "name": "m", "legs": [[0.0, 5.0]], "titles": ["dutch"],
+            "tasks": [{"kind": "log", "text": "go"}],
+        }],
+    )
+    runner = _runner(cfg)
+    status = _status()
+    state = GameState()
+    runner.step(0.0, status, None, state)
+    assert runner.stage == "identify"
+    runner.step(1.0, status, None, state)
+    assert runner.stage == "objective"
+
+
+def test_nearest_config_validated() -> None:
+    bad_flag = AppConfig()
+    bad_flag.story = _story_cfg(missions=[{"name": "x", "nearest": "yes"}])
+    with pytest.raises(ConfigError, match=r"\.nearest must be a boolean"):
+        bad_flag.validate()
+
+    bad_titles = AppConfig()
+    bad_titles.story = _story_cfg(missions=[{"name": "x", "titles": ["ok", 42]}])
+    with pytest.raises(ConfigError, match=r"\.titles must be a list of strings"):
+        bad_titles.validate()
+
+    bad_deadzone = AppConfig()
+    bad_deadzone.vision.world.marker_center_deadzone = 0.9
+    with pytest.raises(ConfigError, match="marker_center_deadzone"):
+        bad_deadzone.validate()
+
+    bad_radius = AppConfig()
+    bad_radius.story = _story_cfg()
+    bad_radius.story.marker_arrival_radius = 0.0
+    with pytest.raises(ConfigError, match="marker_arrival_radius"):
+        bad_radius.validate()
+
+    bad_wait = AppConfig()
+    bad_wait.story = _story_cfg()
+    bad_wait.story.title_wait_s = 0.0
+    with pytest.raises(ConfigError, match=r"title_wait_s"):
+        bad_wait.validate()
