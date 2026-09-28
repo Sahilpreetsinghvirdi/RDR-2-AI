@@ -5,11 +5,11 @@ Status: **Mode 1 implemented** - `StoryRunner` behind
 complete stages, objective-region OCR, completion keywords + banner OCR,
 stage timeouts, marker homing, `nearest` chasing with title-card
 identification, stranger/camp profiles, auto-greet) plus Mode 2
-(`.\run.ps1 -Interactive`: pick a mission, free roam, or observe) and
+(`.\Outlaw.ps1 -Interactive`: pick a mission, free roam, or observe) and
 `agent.mode`. Still needs live-game work: authored real-mission profiles
 with calibrated legs and title keywords (starters are commented in
 `config.yaml`). Experimental: the local vision brain (`src/ai/brain`,
-`.\run.ps1 -Brain`) replaces the scripted directors with a seeing model -
+`.\Outlaw.ps1 -Brain`) replaces the scripted directors with a seeing model -
 slow on CPU, but visual. See the README "Story mode" section.
 
 ## Mode 1 - Full Autonomous Story Mode
@@ -58,7 +58,7 @@ between tasks; user answers (mission name / "free roam").
   *implemented as `story.mounted_speed_mps` (mounted control copy).*
 - Interactive mode: console picker over a mission-profile library; a
   `free_roam` profile with wander/greet/survive behaviors.
-  *implemented (`.\run.ps1 -Interactive`, `agent.mode`).*
+  *implemented (`.\Outlaw.ps1 -Interactive`, `agent.mode`).*
 - Mission profiles: config-declared scripts per story mission (no
   memory reading; vision/OCR only) - real missions need authoring.
 
@@ -72,7 +72,7 @@ between tasks; user answers (mission name / "free roam").
 ## Sequencing (agreed)
 1. Finish remaining roadmap phases (9-10) as currently scoped.
 2. Hands-on test run: simple control verification - guided by
-   `.\run.ps1 -ControlTest` (Phase 11 harness, steps cross-referenced to
+   `.\Outlaw.ps1 -ControlTest` (Phase 11 harness, steps cross-referenced to
    docs/CONTROLS.md), then input_check / demo / locomotion against the
    live game.
 3. THEN revisit this file and implement the two modes, starting with

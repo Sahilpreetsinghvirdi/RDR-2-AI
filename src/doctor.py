@@ -3,7 +3,7 @@
 Run before hands-on testing::
 
     .\\.venv\\Scripts\\python.exe -m src.doctor
-    .\\run.ps1 -Doctor
+    .\\Outlaw.ps1 -Doctor
 
 Checks the interpreter, dependencies, OCR, configuration, log writability
 and - informationally - whether the game window is present. Exits 1 when

@@ -6,7 +6,7 @@ you should see in game (cross-referenced against ``docs/CONTROLS.md``),
 sends it through the guarded ``InputController`` and records your y/n
 verdict per step.
 
-    .\\run.ps1 -ControlTest                # interactive, game focused
+    .\\Outlaw.ps1 -ControlTest                # interactive, game focused
     python -m src.control_test --dry-run  # print the plan, send nothing
 
 Input is only sent while the game window is focused (unless

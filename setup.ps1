@@ -44,6 +44,6 @@ Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
 Write-Host "Next steps:"
 Write-Host "  1. Launch RDR2 Story Mode"
-Write-Host "  2. .\run.ps1            (start the agent)"
-Write-Host "  3. .\run.ps1 -Demo      (run the Phase 1 input demonstration)"
+Write-Host "  2. .\Outlaw.ps1            (start the agent)"
+Write-Host "  3. .\Outlaw.ps1 -Demo      (run the Phase 1 input demonstration)"
 Write-Host "  4. F12 = emergency stop, F11 = pause, F10 = human takeover"

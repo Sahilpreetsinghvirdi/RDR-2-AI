@@ -1,14 +1,14 @@
-# Start the RDR2 AI agent (Windows PowerShell)
+# Start Outlaw (Windows PowerShell)
 # Examples:
-#   .\run.ps1
-#   .\run.ps1 -Demo
-#   .\run.ps1 -Autopilot
-#   .\run.ps1 -Headless -Record
-#   .\run.ps1 -Story -ExtraArgs @("--duration","30")
-#   .\run.ps1 -NoConsole   # hide the console, card window only (F12 stops)
-#   .\run.ps1 -Interactive -Headless
-#   .\run.ps1 -Doctor
-#   .\run.ps1 -ControlTest -ExtraArgs @("--dry-run")
+#   .\Outlaw.ps1
+#   .\Outlaw.ps1 -Demo
+#   .\Outlaw.ps1 -Autopilot
+#   .\Outlaw.ps1 -Headless -Record
+#   .\Outlaw.ps1 -Story -ExtraArgs @("--duration","30")
+#   .\Outlaw.ps1 -NoConsole   # hide the console, card window only (F12 stops)
+#   .\Outlaw.ps1 -Interactive -Headless
+#   .\Outlaw.ps1 -Doctor
+#   .\Outlaw.ps1 -ControlTest -ExtraArgs @("--dry-run")
 
 param(
     [switch]$Demo,
@@ -74,7 +74,7 @@ if ($Doctor) {
     if ($ExtraArgs.Count -gt 0) { $argsList += $ExtraArgs }
 }
 
-Write-Host "Starting RDR2 AI: python $($argsList -join ' ')" -ForegroundColor Cyan
+Write-Host "Starting Outlaw: python $($argsList -join ' ')" -ForegroundColor Cyan
 if (-not $Doctor) {
     Write-Host "Emergency stop: F12 | Pause: F11 | Human takeover: F10" -ForegroundColor Yellow
 }

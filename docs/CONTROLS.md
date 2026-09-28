@@ -37,7 +37,7 @@ Scope notes from the original list:
 | Pause / resume | `safety.pause_key` | F11 | (agent-only, not a game bind) |
 | Human takeover | `safety.takeover_key` | F10 | (agent-only, not a game bind) |
 
-The guided live check of exactly these inputs is `.\run.ps1 -ControlTest`
+The guided live check of exactly these inputs is `.\Outlaw.ps1 -ControlTest`
 (Phase 11 harness).
 
 ## Commands A - C

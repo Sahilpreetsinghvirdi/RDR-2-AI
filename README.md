@@ -200,7 +200,7 @@ code into the game, or interact with Red Dead Online.
   instead of crashing. Disabled components appear under `guard` in
   metrics. Perception failures still propagate (never act on broken
   vision).
-- `.\run.ps1 -Doctor` / `python -m src.doctor`: environment self-check
+- `.\Outlaw.ps1 -Doctor` / `python -m src.doctor`: environment self-check
   with PASS/WARN/FAIL rows - interpreter, imports, Tesseract, config
   validity (warnings included), log writability, game-window presence,
   key map sanity. Exits 1 only on FAIL; run it before any hands-on test.
@@ -208,20 +208,20 @@ code into the game, or interact with Red Dead Online.
   (oldest row dropped, episode boundary promoted), so multi-hour sessions
   cannot grow the RL buffer without limit.
 - Packaging polish: `pytesseract` declared in `pyproject.toml`,
-  version bumped to 0.2.0, `-Doctor` switch in `run.ps1`.
+  version bumped to 0.2.0, `-Doctor` switch in `Outlaw.ps1`.
 - Hands-on verification checklist (performed after all phases):
-  1. `.\run.ps1 -Doctor` - all rows PASS or WARN.
-  2. `.\run.ps1 -ControlTest` - guided live check of every input the
+  1. `.\Outlaw.ps1 -Doctor` - all rows PASS or WARN.
+  2. `.\Outlaw.ps1 -ControlTest` - guided live check of every input the
      agent can send (Phase 11); or quick single-key checks with
      `.\.venv\Scripts\python.exe tools\input_check.py`.
-  3. `.\run.ps1 -Demo` with the game focused - observe the short input
+  3. `.\Outlaw.ps1 -Demo` with the game focused - observe the short input
      demo, F12 must kill it instantly.
-  4. `.\run.ps1 -Autopilot -ExtraArgs @("--duration","30")` - scripted
+  4. `.\Outlaw.ps1 -Autopilot -ExtraArgs @("--duration","30")` - scripted
      look/walk cycle with the HUD visible.
   5. Only then try mission/responder/combat/survival flags one at a time.
 
 ### Phase 11 - control verification harness
-- `src/control_test.py` (`.\run.ps1 -ControlTest`): a guided, step-by-step
+- `src/control_test.py` (`.\Outlaw.ps1 -ControlTest`): a guided, step-by-step
   live test of **every input primitive the agent can send** - movement
   (`control.keys`), camera pans, jump/interact taps, survival quick-use
   keys, aim, and fire. Each step prints what you should see in game and
@@ -241,7 +241,7 @@ code into the game, or interact with Red Dead Online.
 
 `src/story/runner.py` (NOTES Mode 1) plays a configured mission list
 end-to-end behind the disabled-by-default `story.enabled` flag (or
-`.\run.ps1 -Story`). Per mission the director runs stages, then
+`.\Outlaw.ps1 -Story`). Per mission the director runs stages, then
 advances:
 
 - **mount** (optional, `mount: true`) - taps the horse whistle (`control.keys`
@@ -321,12 +321,12 @@ Route legs are dead-reckoned: stand Arthur at the start, face the target,
 and measure legs with `.\calibrate.ps1 -Inspect` before trusting a profile.
 Starter profiles (camp rest with satchel eating, save-game menu flow,
 stranger template, honor roam) live commented under `story:` in
-`config.yaml` - uncomment and calibrate. `.\run.ps1 -Interactive` asks each
+`config.yaml` - uncomment and calibrate. `.\Outlaw.ps1 -Interactive` asks each
 session which mission to run, offers free roam, or just observes.
 
 ### Local vision brain (experimental)
 
-`src/ai/brain/` (`.\run.ps1 -Brain`) puts a local vision-language model in
+`src/ai/brain/` (`.\Outlaw.ps1 -Brain`) puts a local vision-language model in
 charge instead of the scripted directors. A background thread sends a
 downscaled screenshot plus the game-state summary (threat, cores,
 objective/prompt/dialogue text) to ollama every `brain.interval_s` and gets
@@ -479,15 +479,15 @@ HUD elements (leave a small margin around each core).
 ## Running
 
 ```powershell
-.\run.ps1 -Doctor                # environment self-check first
-.\run.ps1 -ControlTest           # guided live input verification (Phase 11)
-.\run.ps1 -ControlTest -ExtraArgs @("--dry-run")   # print the plan only
-.\run.ps1                     # normal run (debug window on)
-.\run.ps1 -Demo               # Phase 1 input demonstration
-.\run.ps1 -Headless -Record   # no debug window, record frames
-.\run.ps1 -NoConsole          # hide the console, card window only (F12 stops)
-.\run.ps1 -Backend synthetic  # development without the game
-.\run.ps1 -ExtraArgs @("--duration","30")
+.\Outlaw.ps1 -Doctor                # environment self-check first
+.\Outlaw.ps1 -ControlTest           # guided live input verification (Phase 11)
+.\Outlaw.ps1 -ControlTest -ExtraArgs @("--dry-run")   # print the plan only
+.\Outlaw.ps1                     # normal run (debug window on)
+.\Outlaw.ps1 -Demo               # Phase 1 input demonstration
+.\Outlaw.ps1 -Headless -Record   # no debug window, record frames
+.\Outlaw.ps1 -NoConsole          # hide the console, card window only (F12 stops)
+.\Outlaw.ps1 -Backend synthetic  # development without the game
+.\Outlaw.ps1 -ExtraArgs @("--duration","30")
 
 # or directly:
 .\.venv\Scripts\python.exe -m src.main --help
@@ -599,21 +599,21 @@ synthetic backend ~24 fps, ~3 ms latency.
     disabled, inputs released, loop continues), `src.doctor` self-check,
     `rl.buffer_max` memory cap, packaging/version polish.
 11. **Phase 11 (done)** - control verification: full PC controls
-    reference (`docs/CONTROLS.md`) plus the `.\run.ps1 -ControlTest`
+    reference (`docs/CONTROLS.md`) plus the `.\Outlaw.ps1 -ControlTest`
     guided harness that sends every agent input primitive live and
     records your verdict against the reference.
 12. **Story mode (done)** - NOTES Mode 1 director behind
-    `story.enabled` (or `.\run.ps1 -Story`): mount/travel/dismount/
+    `story.enabled` (or `.\Outlaw.ps1 -Story`): mount/travel/dismount/
     objective/roam/identify/completion stages over whistle + RoutePlanner +
     MissionRunner, objective-region OCR, completion keywords with banner
     OCR, stage timeouts, marker homing (`seek_marker`), nearest-marker
     chasing (`nearest`) with title-card identification (`titles`),
     stranger/camp profiles with opportunistic detours, auto-greet honor
-    strategy; plus Mode 2 (`.\run.ps1 -Interactive`: pick a mission,
+    strategy; plus Mode 2 (`.\Outlaw.ps1 -Interactive`: pick a mission,
     free roam, observe) and `agent.mode`. Starter profiles live commented
     in `config.yaml` - legs still need in-game calibration.
 13. **Local vision brain (experimental, done)** - `src/ai/brain` behind
-    `brain.enabled` (or `.\run.ps1 -Brain`): background-thread VLM strategist
+    `brain.enabled` (or `.\Outlaw.ps1 -Brain`): background-thread VLM strategist
     (qwen2.5vl:3b via ollama) that sees the screen and picks skill actions,
     executed while fresh through guarded input; combat/survival stay as
     reflexes. Slow on CPU-only machines, but genuinely visual.
@@ -625,7 +625,7 @@ hotkeys are never bypassed by later phases.
 
 | Symptom | Fix |
 |---------|-----|
-| Anything unexpected at startup | Run `.\run.ps1 -Doctor` first - it reports interpreter, dependencies, Tesseract, config and window status as PASS/WARN/FAIL. |
+| Anything unexpected at startup | Run `.\Outlaw.ps1 -Doctor` first - it reports interpreter, dependencies, Tesseract, config and window status as PASS/WARN/FAIL. |
 | `capture backend selected: mss` + slow fps | dxcam unavailable; reinstall `dxcam`, run as the same user as the desktop session. |
 | Frames are 0, log says `waiting_for_window` | RDR2 Story Mode is not running, or the window title is not exactly a `window.title_patterns` entry (`window.match: exact` by default). Check `.\calibrate.ps1 -Inspect`. |
 | Colors look swapped in saved frames | Set `capture.color_order` explicitly (`bgr`/`rgb`); dxcam delivers RGB, mss delivers BGRA. |
@@ -637,7 +637,7 @@ hotkeys are never bypassed by later phases.
 | Input has no effect in game | Click the game window first; input is refused unless the game is focused. Try `input.keyboard_mode: virtual_key` if scancodes are ignored. |
 | `hotkeys not armed` / F12 ignored | The agent process must be running; check `logs/rdr2ai_*.log` for the `hotkeys armed` line. |
 | Watchdog faults at startup | Lower `agent.loop_hz` or raise `safety.heartbeat_stall_s`; check `logs/events.jsonl` for the stalled component. |
-| Debug window eats CPU | Run `.\run.ps1 -Headless` or set `debug.gui: false`. |
+| Debug window eats CPU | Run `.\Outlaw.ps1 -Headless` or set `debug.gui: false`. |
 | Wrong monitor captured | Set `capture.monitor_index` and verify with `.\calibrate.ps1 -Inspect -Full`. |
 | Pytest import errors | Run from the project root: `.\.venv\Scripts\python.exe -m pytest -q` (uses `pythonpath = ["."]`). |
 
@@ -646,8 +646,8 @@ hotkeys are never bypassed by later phases.
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q      # 636 tests
 .\.venv\Scripts\python.exe -m ruff check .   # lint
-.\run.ps1 -Doctor                            # environment self-check
-.\run.ps1 -ControlTest                       # guided input verification
+.\Outlaw.ps1 -Doctor                            # environment self-check
+.\Outlaw.ps1 -ControlTest                       # guided input verification
 ```
 
 Conventions: type hints everywhere, no hardcoded tunables (config only),
