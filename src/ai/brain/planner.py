@@ -225,7 +225,7 @@ class BrainPlanner:
         else:
             text = ask_ollama(
                 self._cfg.host, self._cfg.model, prompt, image_b64,
-                self._cfg.timeout_s,
+                self._cfg.timeout_s, self._cfg.max_tokens,
             )
         latency_ms = (time.monotonic() - start) * 1000.0
         action, reason, clean = parse_decision(text)

@@ -410,6 +410,7 @@ class BrainConfig:
     timeout_s: float = 300.0            # HTTP timeout per decision (CPU is slow)
     stale_after_s: float = 300.0        # decisions older than this are dropped
     max_image_px: int = 640             # downscale width before sending
+    max_tokens: int = 80                # cap the reply length (small models ramble)
     turn_step_deg: float = 15.0         # camera turn for turn_left/turn_right
     step_s: float = 0.5                 # move burst for forward/back/strafe/sprint
 
@@ -930,6 +931,12 @@ class AppConfig:
             or brain.max_image_px < 160
         ):
             problems.append("brain.max_image_px must be an int >= 160")
+        if (
+            not isinstance(brain.max_tokens, int)
+            or isinstance(brain.max_tokens, bool)
+            or brain.max_tokens < 1
+        ):
+            problems.append("brain.max_tokens must be an int >= 1")
         if brain.enabled and mission.enabled:
             problems.append(
                 "brain.enabled conflicts with mission.enabled (pick one primary driver)"

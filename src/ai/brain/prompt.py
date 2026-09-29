@@ -9,6 +9,7 @@ harmless ``noop`` so a confused model can never inject input.
 from __future__ import annotations
 
 import json
+import re
 
 ACTIONS = (
     "noop",
@@ -22,6 +23,25 @@ ACTIONS = (
     "interact",
     "whistle",
 )
+
+ACTION_ALIASES = {
+    "walk": "forward",
+    "go": "forward",
+    "run": "sprint",
+    "left": "turn_left",
+    "right": "turn_right",
+    "stop": "noop",
+    "wait": "noop",
+}
+
+
+def _clean_action(raw: object) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    name = raw.strip().lower()
+    if name in ACTIONS:
+        return name
+    return ACTION_ALIASES.get(name)
 
 
 def build_prompt(summary: dict[str, object]) -> str:
@@ -65,18 +85,26 @@ def parse_decision(text: str) -> tuple[str, str, bool]:
         cleaned = "\n".join(lines).strip()
     start = cleaned.find("{")
     end = cleaned.rfind("}")
-    if start < 0 or end <= start:
-        return "noop", "unparseable reply", False
-    try:
-        data = json.loads(cleaned[start:end + 1])
-    except (json.JSONDecodeError, ValueError):
-        return "noop", "invalid JSON", False
-    if not isinstance(data, dict):
-        return "noop", "reply was not an object", False
-    action = data.get("action")
-    reason = data.get("reason", "")
-    if action not in ACTIONS:
-        return "noop", f"unknown action {action!r}", False
-    if not isinstance(reason, str):
-        reason = str(reason)
-    return str(action), reason.strip()[:160], True
+    if start >= 0 and end > start:
+        try:
+            data = json.loads(cleaned[start:end + 1])
+        except (json.JSONDecodeError, ValueError):
+            data = None
+        if isinstance(data, dict):
+            action = _clean_action(data.get("action"))
+            reason = data.get("reason", "")
+            if action is not None:
+                if not isinstance(reason, str):
+                    reason = str(reason)
+                return action, reason.strip()[:160], True
+    fallback = re.search(r'"action"\s*:\s*"([A-Za-z_]+)"', cleaned)
+    if fallback is not None:
+        action = _clean_action(fallback.group(1))
+        if action is not None:
+            reason = re.search(r'"reason"\s*:\s*"([^"]{0,160})', cleaned)
+            return (
+                action,
+                reason.group(1).strip() if reason else "repaired reply",
+                False,
+            )
+    return "noop", "unparseable reply", False

@@ -143,7 +143,33 @@ def make_region_provider(wm: GameWindowManager) -> Callable[[], Rect | None]:
     return provider
 
 
+def _console_close_handler(event: int) -> bool:
+    """Survive the launcher console being closed; Ctrl+C still interrupts."""
+    return event in (2, 5, 6)
+
+
+_CONSOLE_HANDLER: object | None = None
+
+
+def _ignore_console_close() -> None:
+    """Keep the agent alive when its console window is closed (F12 still stops)."""
+    global _CONSOLE_HANDLER
+    try:
+        import ctypes
+
+        prototype = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_ulong)
+
+        def _handle(event: int) -> bool:
+            return _console_close_handler(event)
+
+        _CONSOLE_HANDLER = prototype(_handle)
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(_CONSOLE_HANDLER, True)
+    except Exception:
+        pass
+
+
 def run_agent(cfg: AppConfig, args: argparse.Namespace) -> int:
+    _ignore_console_close()
     machine = StateMachine()
     heartbeats = HeartbeatRegistry()
     wm = GameWindowManager(cfg.window)
@@ -775,6 +801,42 @@ def _read_lock_pid(path: Path) -> int | None:
         return None
 
 
+_MUTEX_NAME = "Local\\OutlawAgentSingleInstance"
+_MUTEX_HANDLES: dict[str, int] = {}
+
+
+def _claim_process_mutex(name: str = _MUTEX_NAME) -> bool:
+    """True when WE now hold the named mutex; False when another process does.
+
+    Unlike the lock file this is atomic, session-wide and needs no working
+    directory, so a second launch from anywhere is refused. The OS releases
+    the mutex if we crash, so it can never go stale.
+    """
+    if name in _MUTEX_HANDLES:
+        return True
+    try:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateMutexW(None, False, name)
+        if not handle:
+            return True
+        if kernel32.GetLastError() == 183:
+            kernel32.CloseHandle(handle)
+            return False
+        _MUTEX_HANDLES[name] = int(handle)
+        return True
+    except Exception:
+        return True
+
+
+def _release_process_mutex(name: str = _MUTEX_NAME) -> None:
+    handle = _MUTEX_HANDLES.pop(name, None)
+    if handle:
+        try:
+            ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            pass
+
+
 def _pid_alive(pid: int) -> bool:
     try:
         kernel32 = ctypes.windll.kernel32
@@ -877,6 +939,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 3
+    if not _claim_process_mutex():
+        _say(
+            "another Outlaw agent is already running - "
+            "not starting a second one",
+            file=sys.stderr,
+        )
+        _release_lock(lock_path)
+        return 3
 
     enable_dpi_awareness()
     log_path = setup_logging(cfg.telemetry)
@@ -907,6 +977,7 @@ def main(argv: list[str] | None = None) -> int:
             return 130
     finally:
         _release_lock(lock_path)
+        _release_process_mutex()
 
 
 if __name__ == "__main__":

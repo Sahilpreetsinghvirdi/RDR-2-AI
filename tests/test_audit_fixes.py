@@ -553,3 +553,25 @@ def test_stale_lock_is_taken_over(tmp_path: Path) -> None:
     claimed = _claim_single_instance(cfg)
     assert claimed is not None
     assert lock.read_text(encoding="utf-8").strip() == str(os.getpid())
+
+
+def test_process_mutex_single_holder() -> None:
+    from src.main import _claim_process_mutex, _release_process_mutex
+
+    name = "Local\\OutlawTestMutexSingleHolder"
+    assert _claim_process_mutex(name) is True
+    assert _claim_process_mutex(name) is True
+    _release_process_mutex(name)
+    assert _claim_process_mutex(name) is True
+    _release_process_mutex(name)
+
+
+def test_console_close_handler() -> None:
+    from src.main import _console_close_handler, _ignore_console_close
+
+    assert _console_close_handler(2) is True
+    assert _console_close_handler(5) is True
+    assert _console_close_handler(6) is True
+    assert _console_close_handler(0) is False
+    assert _console_close_handler(1) is False
+    _ignore_console_close()

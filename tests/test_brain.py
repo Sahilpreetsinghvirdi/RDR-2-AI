@@ -80,6 +80,27 @@ def test_parse_garbage_falls_back_to_noop() -> None:
         assert clean is False
 
 
+def test_parse_truncated_json_repairs_action() -> None:
+    text = ' {"action": "forward", "reason": "...", "distance": 0.85, '
+    action, _, clean = parse_decision(text)
+    assert action == "forward"
+    assert clean is False
+
+
+def test_parse_missing_reason_defaults() -> None:
+    action, reason, clean = parse_decision('prefix {"action": "whistle"} suffix')
+    assert action == "whistle"
+    assert clean is True
+    assert reason == ""
+
+
+def test_parse_action_aliases() -> None:
+    for raw, expected in [("walk", "forward"), ("run", "sprint"),
+                          ("left", "turn_left"), ("stop", "noop")]:
+        action, _, _ = parse_decision(f'{{"action": "{raw}"}}')
+        assert action == expected
+
+
 def test_prompt_lists_actions_and_state() -> None:
     prompt = build_prompt({"threat": "none", "objective": "Go to Dutch"})
     assert "forward" in prompt and "whistle" in prompt

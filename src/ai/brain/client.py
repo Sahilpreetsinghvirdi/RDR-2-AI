@@ -12,6 +12,7 @@ def ask_ollama(
     prompt: str,
     image_b64: str,
     timeout_s: float,
+    max_tokens: int = 80,
 ) -> str:
     """Send one image + prompt to /api/generate; return the raw text reply."""
     payload = {
@@ -19,7 +20,7 @@ def ask_ollama(
         "prompt": prompt,
         "images": [image_b64],
         "stream": False,
-        "options": {"temperature": 0.2},
+        "options": {"temperature": 0.2, "num_predict": max_tokens},
     }
     request = urllib.request.Request(
         host.rstrip("/") + "/api/generate",
